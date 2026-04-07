@@ -27,7 +27,13 @@ try:
 except ValueError:
     ADMIN_CHAT_ID = 0
 
-DATABASE_URL: str | None = os.getenv("DATABASE_URL") or None
+# Railway: для приватної мережі спочатку використовуйте DATABASE_PRIVATE_URL (змінні Postgres-сервісу)
+_raw_db = (
+    os.getenv("DATABASE_PRIVATE_URL", "").strip()
+    or os.getenv("DATABASE_URL", "").strip()
+    or None
+)
+DATABASE_URL: str | None = _raw_db
 USE_POSTGRES: bool = bool(DATABASE_URL)
 
 SQLITE_PATH: str = os.getenv("SQLITE_PATH", "college.db")

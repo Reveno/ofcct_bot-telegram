@@ -40,13 +40,21 @@
 У репозиторії вже є `railway.toml` (команда старту `python main.py`) та `runtime.txt` (Python 3.12).
 
 1. У [Railway](https://railway.app) створіть **New Project** → **Deploy from GitHub** → оберіть репозиторій (наприклад `Reveno/ofcct_bot-telegram`).
-2. Додайте плагін **PostgreSQL**: у проєкті **New** → **Database** → **PostgreSQL**. У сервісі бота відкрийте **Variables** → **Add Reference** → оберіть змінну `DATABASE_URL` з бази (або Railway підставить її автоматично при зв’язку).
+2. Додайте плагін **PostgreSQL** в **той самий проєкт**, що й бот. У сервісі бота: **Variables** → **Add Variable Reference** → сервіс **Postgres** → додайте **`DATABASE_PRIVATE_URL`** (якщо Railway показує її в списку), інакше **`DATABASE_URL`**. Код спочатку читає `DATABASE_PRIVATE_URL` — це зменшує проблеми з мережею всередині Railway.
 3. У **Variables** сервісу з ботом додайте вручну (значення з вашого `.env`, **не** комітьте їх у Git):
    - `BOT_TOKEN`, `ADMIN_BOT_TOKEN`
    - `ADMIN_IDS`, `ADMIN_CHAT_ID`
    - за потреби `SOCIAL_*` URL
 4. Запуск визначено в `railway.toml`. Після деплою перевірте **Deploy Logs** — мають ініціалізуватися обидва боти.
 5. Якщо збірка не бачить залежності: **Root Directory** у налаштуваннях сервісу має вказувати на корінь репозиторію (там, де `main.py` та `requirements.txt`).
+
+### Помилка `Connect call failed` / `Errno 111` до PostgreSQL
+
+- Переконайтеся, що **Postgres і бот у одному проєкті**, а не в двох окремих.
+- У **Variables** сервісу бота має бути **reference** на змінні з плагіна Postgres, а не ручний копіпаст з іншого місця.
+- Додайте reference на **`DATABASE_PRIVATE_URL`**, якщо є; інакше — **`DATABASE_URL`**.
+- Якщо після цього залишаються помилки SSL (рідко): додайте змінну `PGSSLMODE` = `require` у сервісі бота.
+- Після змін змінних **Redeploy** сервісу. У коді є **повторні спроби підключення** (до ~1 хв), щоб Postgres встиг піднятися після деплою.
 
 ## Завантаження розкладу (Excel)
 

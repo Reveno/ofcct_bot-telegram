@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 import aiosqlite
 
@@ -84,18 +88,53 @@ CREATE TABLE IF NOT EXISTS faq (
 );
 """
 
+_PG_CONNECT_ATTEMPTS = 20
+_PG_CONNECT_DELAY_SEC = 3.0
+
+
+async def _create_pg_pool() -> Any:
+    assert DATABASE_URL
+    if asyncpg is None:
+        raise RuntimeError(
+            "asyncpg is required when DATABASE_URL is set. "
+            "Install asyncpg or unset DATABASE_URL to use SQLite."
+        )
+    ssl_kw: dict[str, Any] = {}
+    mode = (os.getenv("PGSSLMODE") or "").strip().lower()
+    if mode == "require":
+        ssl_kw["ssl"] = True
+    elif mode == "disable":
+        ssl_kw["ssl"] = False
+
+    last_err: BaseException | None = None
+    for attempt in range(1, _PG_CONNECT_ATTEMPTS + 1):
+        try:
+            return await asyncpg.create_pool(
+                DATABASE_URL,
+                min_size=1,
+                max_size=10,
+                **ssl_kw,
+            )
+        except Exception as e:
+            last_err = e
+            logger.warning(
+                "PostgreSQL: спроба %s/%s не вдалася: %s",
+                attempt,
+                _PG_CONNECT_ATTEMPTS,
+                e,
+            )
+            if attempt < _PG_CONNECT_ATTEMPTS:
+                await asyncio.sleep(_PG_CONNECT_DELAY_SEC)
+    assert last_err is not None
+    raise last_err
+
 
 async def init_db() -> None:
     global _sqlite_conn, _pg_pool
     async with _db_lock:
         if USE_POSTGRES:
             assert DATABASE_URL
-            if asyncpg is None:
-                raise RuntimeError(
-                    "asyncpg is required when DATABASE_URL is set. "
-                    "Install asyncpg or unset DATABASE_URL to use SQLite."
-                )
-            _pg_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
+            _pg_pool = await _create_pg_pool()
             async with _pg_pool.acquire() as conn:
                 await conn.execute(
                     """
