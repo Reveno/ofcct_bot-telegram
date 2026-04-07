@@ -35,12 +35,18 @@
    python main.py
    ```
 
-## Деплой на Railway
+## Деплой на Railway (GitHub)
 
-1. Створіть сервіс з підключеним **PostgreSQL** і додайте змінну `DATABASE_URL` (Railway зазвичай підставляє її автоматично).
-2. У змінних середовища вкажіть усі поля з `.env.example` (токени, `ADMIN_IDS`, `ADMIN_CHAT_ID`).
-3. Команда старту: `python main.py` з кореня `college_bot` (або налаштуйте `ROOT` у налаштуваннях збірки).
-4. На Railway оберіть **Python 3.11** або **3.12** у `runtime.txt` або в налаштуваннях, щоб `asyncpg` ставився з готових коліс.
+У репозиторії вже є `railway.toml` (команда старту `python main.py`) та `runtime.txt` (Python 3.12).
+
+1. У [Railway](https://railway.app) створіть **New Project** → **Deploy from GitHub** → оберіть репозиторій (наприклад `Reveno/ofcct_bot-telegram`).
+2. Додайте плагін **PostgreSQL**: у проєкті **New** → **Database** → **PostgreSQL**. У сервісі бота відкрийте **Variables** → **Add Reference** → оберіть змінну `DATABASE_URL` з бази (або Railway підставить її автоматично при зв’язку).
+3. У **Variables** сервісу з ботом додайте вручну (значення з вашого `.env`, **не** комітьте їх у Git):
+   - `BOT_TOKEN`, `ADMIN_BOT_TOKEN`
+   - `ADMIN_IDS`, `ADMIN_CHAT_ID`
+   - за потреби `SOCIAL_*` URL
+4. Запуск визначено в `railway.toml`. Після деплою перевірте **Deploy Logs** — мають ініціалізуватися обидва боти.
+5. Якщо збірка не бачить залежності: **Root Directory** у налаштуваннях сервісу має вказувати на корінь репозиторію (там, де `main.py` та `requirements.txt`).
 
 ## Завантаження розкладу (Excel)
 
