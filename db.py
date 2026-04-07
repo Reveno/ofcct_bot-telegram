@@ -79,10 +79,11 @@ CREATE TABLE IF NOT EXISTS feedback (
 );
 
 CREATE TABLE IF NOT EXISTS broadcasts (
-    id       INTEGER PRIMARY KEY AUTOINCREMENT,
-    text     TEXT NOT NULL,
-    sent_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    sent_by  INTEGER
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    text           TEXT NOT NULL,
+    sent_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    sent_by        INTEGER,
+    photo_file_id  TEXT
 );
 
 CREATE TABLE IF NOT EXISTS faq (
@@ -213,12 +214,16 @@ async def init_db() -> None:
                 await conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS broadcasts (
-                        id       SERIAL PRIMARY KEY,
-                        text     TEXT NOT NULL,
-                        sent_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        sent_by  BIGINT
+                        id             SERIAL PRIMARY KEY,
+                        text           TEXT NOT NULL,
+                        sent_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        sent_by        BIGINT,
+                        photo_file_id  TEXT
                     )
                     """
+                )
+                await conn.execute(
+                    "ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS photo_file_id TEXT"
                 )
                 await conn.execute(
                     """
@@ -237,6 +242,7 @@ async def init_db() -> None:
             await _sqlite_conn.executescript(CREATE_TABLES_SQL)
             await _sqlite_conn.commit()
             await _migrate_sqlite_schedule_course()
+            await _migrate_sqlite_broadcasts_photo()
 
 
 async def _migrate_sqlite_schedule_course() -> None:
@@ -244,6 +250,18 @@ async def _migrate_sqlite_schedule_course() -> None:
     try:
         await _sqlite_conn.execute(
             "ALTER TABLE schedule ADD COLUMN course INTEGER"
+        )
+        await _sqlite_conn.commit()
+    except aiosqlite.OperationalError as e:
+        if "duplicate column" not in str(e).lower():
+            raise
+
+
+async def _migrate_sqlite_broadcasts_photo() -> None:
+    assert _sqlite_conn
+    try:
+        await _sqlite_conn.execute(
+            "ALTER TABLE broadcasts ADD COLUMN photo_file_id TEXT"
         )
         await _sqlite_conn.commit()
     except aiosqlite.OperationalError as e:
@@ -1067,28 +1085,31 @@ async def count_unanswered() -> int:
 # --- broadcasts ---
 
 
-async def insert_broadcast(text: str, sent_by: int) -> int:
+async def insert_broadcast(
+    text: str, sent_by: int, photo_file_id: str | None = None
+) -> int:
     if USE_POSTGRES:
         assert _pg_pool
         async with _pg_pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO broadcasts (text, sent_by)
-                VALUES ($1, $2)
+                INSERT INTO broadcasts (text, sent_by, photo_file_id)
+                VALUES ($1, $2, $3)
                 RETURNING id
                 """,
                 text,
                 sent_by,
+                photo_file_id,
             )
             return int(row["id"])
     assert _sqlite_conn
     cur = await _sqlite_conn.execute(
         """
-        INSERT INTO broadcasts (text, sent_by)
-        VALUES (?, ?)
+        INSERT INTO broadcasts (text, sent_by, photo_file_id)
+        VALUES (?, ?, ?)
         RETURNING id
         """,
-        (text, sent_by),
+        (text, sent_by, photo_file_id),
     )
     row = await cur.fetchone()
     await _sqlite_conn.commit()
@@ -1101,7 +1122,7 @@ async def get_recent_broadcasts(limit: int = 5) -> list[dict[str, Any]]:
         async with _pg_pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT id, text, sent_at, sent_by
+                SELECT id, text, sent_at, sent_by, photo_file_id
                 FROM broadcasts
                 ORDER BY sent_at DESC
                 LIMIT $1
@@ -1112,7 +1133,7 @@ async def get_recent_broadcasts(limit: int = 5) -> list[dict[str, Any]]:
     assert _sqlite_conn
     async with _sqlite_conn.execute(
         """
-        SELECT id, text, sent_at, sent_by
+        SELECT id, text, sent_at, sent_by, photo_file_id
         FROM broadcasts
         ORDER BY sent_at DESC
         LIMIT ?
@@ -1133,6 +1154,22 @@ async def count_broadcasts() -> int:
     async with _sqlite_conn.execute("SELECT COUNT(*) FROM broadcasts") as cur:
         row = await cur.fetchone()
         return int(row[0]) if row else 0
+
+
+async def delete_broadcast(broadcast_id: int) -> bool:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "DELETE FROM broadcasts WHERE id = $1 RETURNING id", broadcast_id
+            )
+            return row is not None
+    assert _sqlite_conn
+    cur = await _sqlite_conn.execute(
+        "DELETE FROM broadcasts WHERE id = ?", (broadcast_id,)
+    )
+    await _sqlite_conn.commit()
+    return cur.rowcount > 0
 
 
 # --- faq ---

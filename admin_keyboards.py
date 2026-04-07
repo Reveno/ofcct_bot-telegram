@@ -18,6 +18,11 @@ def admin_main_keyboard() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
+                    text=t("admin.news_manage"), callback_data="adm:news_manage"
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text=t("admin.schedule"), callback_data="adm:schedule"
                 )
             ],
