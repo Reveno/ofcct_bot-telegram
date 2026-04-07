@@ -1,0 +1,149 @@
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+from i18n import t
+
+
+def main_menu_keyboard() -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=t("menu.schedule"), callback_data="menu:schedule"
+            )
+        ],
+        [InlineKeyboardButton(text=t("menu.faq"), callback_data="menu:faq")],
+        [
+            InlineKeyboardButton(
+                text=t("menu.feedback"), callback_data="menu:feedback"
+            )
+        ],
+        [InlineKeyboardButton(text=t("menu.social"), callback_data="menu:social")],
+        [
+            InlineKeyboardButton(
+                text=t("menu.retakes"), callback_data="menu:retakes"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=t("menu.subscription"), callback_data="menu:subscription"
+            )
+        ],
+        [InlineKeyboardButton(text=t("menu.news"), callback_data="menu:news")],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
+def back_to_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(text=t("common.back"), callback_data="menu:main")]]
+    )
+
+
+def schedule_groups_keyboard(groups: list[str]) -> InlineKeyboardMarkup:
+    rows = []
+    row: list[InlineKeyboardButton] = []
+    for g in groups:
+        row.append(InlineKeyboardButton(text=g, callback_data=f"sch:g:{g}"))
+        if len(row) >= 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append(
+        [InlineKeyboardButton(text=t("common.back"), callback_data="menu:main")]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+def schedule_days_keyboard(group: str) -> InlineKeyboardMarkup:
+    rows = []
+    row = []
+    for d in range(1, 7):
+        label = t(f"days.short{d}")
+        row.append(
+            InlineKeyboardButton(
+                text=label, callback_data=f"sch:d:{group}:{d}"
+            )
+        )
+        if len(row) == 3:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text=t("common.back"), callback_data="sch:back_groups"
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+def faq_list_keyboard(items: list[tuple[int, str]]) -> InlineKeyboardMarkup:
+    rows = []
+    for i, (fid, question) in enumerate(items, start=1):
+        short = question if len(question) <= 48 else question[:45] + "…"
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{i}. {short}", callback_data=f"faq:{fid}"
+                )
+            ]
+        )
+    rows.append(
+        [InlineKeyboardButton(text=t("common.back"), callback_data="menu:main")]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+def subscription_keyboard(subscribed: bool) -> InlineKeyboardMarkup:
+    toggle = (
+        t("subscription.unsubscribe")
+        if subscribed
+        else t("subscription.subscribe")
+    )
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(text=toggle, callback_data="sub:toggle")],
+            [
+                InlineKeyboardButton(
+                    text=t("common.back"), callback_data="menu:main"
+                )
+            ],
+        ]
+    )
+
+
+def social_keyboard() -> InlineKeyboardMarkup:
+    from config import (
+        SOCIAL_FACEBOOK_URL,
+        SOCIAL_INSTAGRAM_URL,
+        SOCIAL_SITE_URL,
+        SOCIAL_TELEGRAM_URL,
+    )
+
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    text=t("social.instagram"), url=SOCIAL_INSTAGRAM_URL
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=t("social.telegram_channel"), url=SOCIAL_TELEGRAM_URL
+                )
+            ],
+            [InlineKeyboardButton(text=t("social.website"), url=SOCIAL_SITE_URL)],
+            [
+                InlineKeyboardButton(
+                    text=t("social.facebook"), url=SOCIAL_FACEBOOK_URL
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=t("common.back"), callback_data="menu:main"
+                )
+            ],
+        ]
+    )
