@@ -272,6 +272,7 @@ async def upload_confirm(
             "subject": e.get("subject"),
             "teacher": e.get("teacher"),
             "room": e.get("room"),
+            "course": e.get("course"),
         }
         for e in parsed
     ]

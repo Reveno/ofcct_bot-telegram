@@ -4,8 +4,12 @@ import asyncio
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
+
+# Два перші цифри коду набору в назві групи: «23 Д1», «23Д1», «25 ТТ1»
+_COHORT_PREFIX_RE = re.compile(r"^\s*(\d{2})(?=\s|$|\D)")
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +41,8 @@ CREATE TABLE IF NOT EXISTS schedule (
     lesson_number  INTEGER NOT NULL,
     subject        TEXT,
     teacher        TEXT,
-    room           TEXT
+    room           TEXT,
+    course         INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS schedule_changes (
@@ -155,9 +160,13 @@ async def init_db() -> None:
                         lesson_number  INTEGER NOT NULL,
                         subject        TEXT,
                         teacher        TEXT,
-                        room           TEXT
+                        room           TEXT,
+                        course         INTEGER
                     )
                     """
+                )
+                await conn.execute(
+                    "ALTER TABLE schedule ADD COLUMN IF NOT EXISTS course INTEGER"
                 )
                 await conn.execute(
                     """
@@ -227,6 +236,19 @@ async def init_db() -> None:
             _sqlite_conn.row_factory = aiosqlite.Row
             await _sqlite_conn.executescript(CREATE_TABLES_SQL)
             await _sqlite_conn.commit()
+            await _migrate_sqlite_schedule_course()
+
+
+async def _migrate_sqlite_schedule_course() -> None:
+    assert _sqlite_conn
+    try:
+        await _sqlite_conn.execute(
+            "ALTER TABLE schedule ADD COLUMN course INTEGER"
+        )
+        await _sqlite_conn.commit()
+    except aiosqlite.OperationalError as e:
+        if "duplicate column" not in str(e).lower():
+            raise
 
 
 async def close_db() -> None:
@@ -391,8 +413,8 @@ async def insert_schedule_bulk(entries: list[dict[str, Any]]) -> None:
         async with _pg_pool.acquire() as conn:
             await conn.executemany(
                 """
-                INSERT INTO schedule (group_name, day_of_week, lesson_number, subject, teacher, room)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                INSERT INTO schedule (group_name, day_of_week, lesson_number, subject, teacher, room, course)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 """,
                 [
                     (
@@ -402,6 +424,7 @@ async def insert_schedule_bulk(entries: list[dict[str, Any]]) -> None:
                         e.get("subject"),
                         e.get("teacher"),
                         e.get("room"),
+                        e.get("course"),
                     )
                     for e in entries
                 ],
@@ -410,8 +433,8 @@ async def insert_schedule_bulk(entries: list[dict[str, Any]]) -> None:
         assert _sqlite_conn
         await _sqlite_conn.executemany(
             """
-            INSERT INTO schedule (group_name, day_of_week, lesson_number, subject, teacher, room)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO schedule (group_name, day_of_week, lesson_number, subject, teacher, room, course)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -421,6 +444,7 @@ async def insert_schedule_bulk(entries: list[dict[str, Any]]) -> None:
                     e.get("subject"),
                     e.get("teacher"),
                     e.get("room"),
+                    e.get("course"),
                 )
                 for e in entries
             ],
@@ -482,6 +506,177 @@ async def get_all_groups() -> list[str]:
     ) as cur:
         rows = await cur.fetchall()
         return [r["group_name"] for r in rows]
+
+
+async def get_distinct_course_numbers() -> list[int]:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT DISTINCT course FROM schedule
+                WHERE course IS NOT NULL
+                ORDER BY course
+                """
+            )
+            return [int(r["course"]) for r in rows]
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        """
+        SELECT DISTINCT course FROM schedule
+        WHERE course IS NOT NULL
+        ORDER BY course
+        """
+    ) as cur:
+        rows = await cur.fetchall()
+        return [int(r[0]) for r in rows]
+
+
+async def has_groups_without_course() -> bool:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            v = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM schedule WHERE course IS NULL LIMIT 1)"
+            )
+            return bool(v)
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        "SELECT EXISTS(SELECT 1 FROM schedule WHERE course IS NULL LIMIT 1)"
+    ) as cur:
+        row = await cur.fetchone()
+        return bool(row and row[0])
+
+
+async def get_groups_by_course_num(course: int) -> list[str]:
+    if course == 0:
+        return await get_groups_without_course()
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT DISTINCT group_name FROM schedule
+                WHERE course = $1
+                ORDER BY group_name
+                """,
+                course,
+            )
+            return [r["group_name"] for r in rows]
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        """
+        SELECT DISTINCT group_name FROM schedule
+        WHERE course = ?
+        ORDER BY group_name
+        """,
+        (course,),
+    ) as cur:
+        rows = await cur.fetchall()
+        return [r["group_name"] for r in rows]
+
+
+async def get_groups_without_course() -> list[str]:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT DISTINCT group_name FROM schedule
+                WHERE course IS NULL
+                ORDER BY group_name
+                """
+            )
+            return [r["group_name"] for r in rows]
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        """
+        SELECT DISTINCT group_name FROM schedule
+        WHERE course IS NULL
+        ORDER BY group_name
+        """
+    ) as cur:
+        rows = await cur.fetchall()
+        return [r["group_name"] for r in rows]
+
+
+def cohort_prefix_from_group_name(name: str) -> int | None:
+    m = _COHORT_PREFIX_RE.match(name.strip())
+    if not m:
+        return None
+    return int(m.group(1))
+
+
+async def get_distinct_cohort_prefixes() -> list[int]:
+    groups = await get_all_groups()
+    seen: set[int] = set()
+    for g in groups:
+        p = cohort_prefix_from_group_name(g)
+        if p is not None:
+            seen.add(p)
+    return sorted(seen)
+
+
+async def has_groups_without_cohort_prefix() -> bool:
+    groups = await get_all_groups()
+    return any(cohort_prefix_from_group_name(g) is None for g in groups)
+
+
+async def get_groups_by_cohort_prefix(prefix: int) -> list[str]:
+    groups = await get_all_groups()
+    out = [g for g in groups if cohort_prefix_from_group_name(g) == prefix]
+    return sorted(out)
+
+
+async def get_groups_without_cohort_prefix() -> list[str]:
+    groups = await get_all_groups()
+    out = [g for g in groups if cohort_prefix_from_group_name(g) is None]
+    return sorted(out)
+
+
+async def is_cohort_ui_mode() -> bool:
+    """True, якщо курсів у БД немає, але є ≥2 різних коду набору в назвах груп."""
+    if await get_distinct_course_numbers():
+        return False
+    return len(await get_distinct_cohort_prefixes()) >= 2
+
+
+async def get_groups_for_course_selection(course: int) -> list[str]:
+    """
+    Групи після вибору кнопки sch:c:*.
+    Спочатку колонка course (аркуші «1 курс» у Excel), інакше — за кодом набору (23, 24…).
+    """
+    if await get_distinct_course_numbers():
+        return await get_groups_by_course_num(course)
+    cohorts = await get_distinct_cohort_prefixes()
+    if len(cohorts) >= 2:
+        if course == 0:
+            return await get_groups_without_cohort_prefix()
+        return await get_groups_by_cohort_prefix(course)
+    return await get_groups_by_course_num(course)
+
+
+async def get_ui_course_buttons() -> list[int] | None:
+    """
+    Список номерів курсів для клавіатури.
+    None — показати плоский список усіх груп (немає ані курсів у БД, ані ≥2 наборів за назвою).
+    [] — немає жодної групи в базі.
+    """
+    nums = await get_distinct_course_numbers()
+    if nums:
+        out = sorted(nums)
+        if await has_groups_without_course():
+            out.append(0)
+        return out
+    cohorts = await get_distinct_cohort_prefixes()
+    if len(cohorts) >= 2:
+        out = list(cohorts)
+        if await has_groups_without_cohort_prefix():
+            out.append(0)
+        return out
+    if await has_groups_without_course():
+        return None
+    return []
 
 
 async def delete_schedule_lesson(group_name: str, day_of_week: int, lesson_number: int) -> None:

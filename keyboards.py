@@ -38,7 +38,33 @@ def back_to_menu_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def schedule_groups_keyboard(groups: list[str]) -> InlineKeyboardMarkup:
+def schedule_courses_keyboard(
+    course_nums: list[int], *, cohort_mode: bool = False
+) -> InlineKeyboardMarkup:
+    rows = []
+    for c in course_nums:
+        if c == 0:
+            label = (
+                t("schedule.cohort_other")
+                if cohort_mode
+                else t("schedule.course_other")
+            )
+        elif cohort_mode:
+            label = t("schedule.cohort_label", n=c)
+        else:
+            label = t("schedule.course_label", n=c)
+        rows.append(
+            [InlineKeyboardButton(text=label, callback_data=f"sch:c:{c}")]
+        )
+    rows.append(
+        [InlineKeyboardButton(text=t("common.back"), callback_data="menu:main")]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+def schedule_groups_keyboard(
+    groups: list[str], *, course: int | None = None
+) -> InlineKeyboardMarkup:
     rows = []
     row: list[InlineKeyboardButton] = []
     for g in groups:
@@ -48,8 +74,9 @@ def schedule_groups_keyboard(groups: list[str]) -> InlineKeyboardMarkup:
             row = []
     if row:
         rows.append(row)
+    back_cb = "sch:back_courses" if course is not None else "menu:main"
     rows.append(
-        [InlineKeyboardButton(text=t("common.back"), callback_data="menu:main")]
+        [InlineKeyboardButton(text=t("common.back"), callback_data=back_cb)]
     )
     return InlineKeyboardMarkup(rows)
 

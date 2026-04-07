@@ -19,6 +19,12 @@
     "welcome": "Вітаємо! Оберіть розділ у меню нижче."
   },
   "schedule": {
+    "choose_course": "Оберіть курс:",
+    "choose_cohort": "Оберіть набір груп:",
+    "course_label": "{n} курс",
+    "course_other": "Інші групи",
+    "cohort_label": "Набір 20{n}",
+    "cohort_other": "Інші групи",
     "choose_group": "Оберіть групу:",
     "choose_day": "Оберіть день тижня:",
     "empty": "Для цієї групи та дня розкладу немає.",

@@ -11,6 +11,14 @@ DAY_COUNT = 5
 _LESSON_MARKER: str | None = None
 
 
+def _course_from_sheet_name(sheet_name: str) -> int | None:
+    """Напр. «1 курс», «2 курс» → 1, 2. Інакше None."""
+    m = re.match(r"^\s*(\d+)\s*курс", sheet_name.strip(), re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    return None
+
+
 def _lesson_row_marker() -> str:
     global _LESSON_MARKER
     if _LESSON_MARKER is None:
@@ -35,13 +43,15 @@ def parse_schedule_xlsx(filepath: str) -> list[dict]:
         'subject':       str,
         'teacher':       str,
         'room':          str,
+        'course':        int | None,  # номер курсу з назви листа («1 курс»)
     }
     """
     wb = load_workbook(filepath, read_only=True, data_only=True)
     results = []
 
-    for _sheet_name in wb.sheetnames:
-        ws = wb[_sheet_name]
+    for sheet_name in wb.sheetnames:
+        course = _course_from_sheet_name(sheet_name)
+        ws = wb[sheet_name]
         rows = list(ws.iter_rows(values_only=True))
 
         if len(rows) < 14:
@@ -94,16 +104,17 @@ def parse_schedule_xlsx(filepath: str) -> list[dict]:
                 teacher = _cell(row_b, col_i)
 
                 if subject:
-                    results.append(
-                        {
-                            "group": group_name,
-                            "day_of_week": day_of_week,
-                            "lesson_number": lesson_num,
-                            "subject": subject,
-                            "teacher": teacher or "",
-                            "room": str(room) if room else "",
-                        }
-                    )
+                    row_dict: dict = {
+                        "group": group_name,
+                        "day_of_week": day_of_week,
+                        "lesson_number": lesson_num,
+                        "subject": subject,
+                        "teacher": teacher or "",
+                        "room": str(room) if room else "",
+                    }
+                    if course is not None:
+                        row_dict["course"] = course
+                    results.append(row_dict)
 
             idx += 2
 
