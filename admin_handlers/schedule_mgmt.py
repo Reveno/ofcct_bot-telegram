@@ -29,6 +29,11 @@ from i18n import t
 from utils.schedule_parser import parse_schedule_async
 
 UP_WAIT, UP_CONFIRM = range(2)
+
+# Одне повідомлення: файл .xlsx + підпис /uploadschedule (зручно для груп)
+_UPLOAD_DOC_WITH_CAPTION = filters.Document.ALL & filters.CaptionRegex(
+    r"^/uploadschedule(@\w+)?(\s|$)"
+)
 DS_GROUP, DS_DAY, DS_LESSON, DS_CONFIRM = range(10, 14)
 C_GROUP, C_DAY, C_LESSON, C_TYPE = range(20, 24)
 C_SUBJECT, C_TEACHER, C_ROOM, C_NOTE, C_NOTE_CANCEL, C_CONFIRM = range(30, 36)
@@ -1063,12 +1068,11 @@ def register(app) -> None:
         entry_points=[
             CommandHandler("uploadschedule", upload_entry_cmd),
             CallbackQueryHandler(upload_entry_cb, pattern=r"^adm:upsched$"),
+            MessageHandler(_UPLOAD_DOC_WITH_CAPTION, upload_receive_doc),
         ],
         states={
             UP_WAIT: [
-                MessageHandler(
-                    filters.Document.ALL & ~filters.COMMAND, upload_receive_doc
-                )
+                MessageHandler(filters.Document.ALL, upload_receive_doc),
             ],
             UP_CONFIRM: [
                 CallbackQueryHandler(upload_confirm, pattern=r"^upsched:(yes|no)$")
