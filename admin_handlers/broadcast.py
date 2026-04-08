@@ -1,6 +1,7 @@
+import io
 import re
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
 from telegram.error import TelegramError
 from telegram.ext import (
     CallbackQueryHandler,
@@ -227,26 +228,73 @@ async def broadcast_confirm(
     async def _run_send() -> None:
         ok = 0
         errors = 0
-        for row in subs:
-            uid = int(row["user_id"])
+        err_lines: list[str] = []
+        # file_id з адмін-бота не підходить для студентського — тягнемо байти через адміна.
+        photo_bytes: bytearray | None = None
+        if photo_id:
             try:
-                if photo_id:
-                    await student_app.bot.send_photo(
-                        chat_id=uid,
-                        photo=photo_id,
-                        caption=text or "",
-                    )
-                else:
-                    await student_app.bot.send_message(chat_id=uid, text=text)
-                ok += 1
-            except TelegramError:
-                errors += 1
-            except Exception:
-                errors += 1
+                af = await context.bot.get_file(photo_id)
+                photo_bytes = await af.download_as_bytearray()
+            except TelegramError as e:
+                err_lines.append(f"Фото (завантаження): {e}")
+            except Exception as e:
+                err_lines.append(f"Фото (завантаження): {e}")
+        cap = text or ""
+        if len(cap) > 1024:
+            cap = cap[:1020] + "…"
+
+        student_photo_id: str | None = None
+
+        if photo_id and photo_bytes is None:
+            errors = len(subs)
+            if not err_lines:
+                err_lines.append(
+                    "Не вдалося завантажити фото для студентського бота."
+                )
+        else:
+            for row in subs:
+                uid = int(row["user_id"])
+                try:
+                    if photo_bytes is not None:
+                        if student_photo_id:
+                            await student_app.bot.send_photo(
+                                chat_id=uid,
+                                photo=student_photo_id,
+                                caption=cap,
+                            )
+                        else:
+                            buf = io.BytesIO(photo_bytes)
+                            buf.seek(0)
+                            msg = await student_app.bot.send_photo(
+                                chat_id=uid,
+                                photo=InputFile(buf, filename="broadcast.jpg"),
+                                caption=cap,
+                            )
+                            if msg.photo:
+                                student_photo_id = msg.photo[-1].file_id
+                    else:
+                        await student_app.bot.send_message(
+                            chat_id=uid, text=text
+                        )
+                    ok += 1
+                except TelegramError as e:
+                    errors += 1
+                    s = str(e)
+                    if s not in err_lines and len(err_lines) < 8:
+                        err_lines.append(s)
+                except Exception as e:
+                    errors += 1
+                    s = str(e)
+                    if s not in err_lines and len(err_lines) < 8:
+                        err_lines.append(s)
 
         try:
             await db.insert_broadcast(
-                text, user.id, photo_file_id=photo_id, title=None, link_url=None
+                text,
+                user.id,
+                photo_file_id=student_photo_id,
+                title=None,
+                link_url=None,
             )
         except Exception:
             # Навіть якщо БД впала — звіт все одно віддамо адміну.
@@ -258,6 +306,13 @@ async def broadcast_confirm(
             total=len(subs),
             errors=errors,
         )
+        if err_lines:
+            report += "\n\n" + t(
+                "admin.broadcast_error_samples",
+                lines="\n".join(err_lines),
+            )
+        if len(report) > 4000:
+            report = report[:3990] + "…"
         try:
             # Оновлюємо текстове повідомлення меню.
             if admin_chat_id and admin_message_id:
@@ -275,11 +330,13 @@ async def broadcast_confirm(
                 )
             # Оновлюємо фото-прев'ю без меню (щоб на ньому не натискали інші кнопки).
             if preview_chat_id and preview_message_id:
-                cap = report if len(report) <= 1024 else report[:1020] + "…"
+                cap_rep = (
+                    report if len(report) <= 1024 else report[:1020] + "…"
+                )
                 await context.bot.edit_message_caption(
                     chat_id=int(preview_chat_id),
                     message_id=int(preview_message_id),
-                    caption=cap,
+                    caption=cap_rep,
                     reply_markup=InlineKeyboardMarkup(
                         [[InlineKeyboardButton(text=t("common.back"), callback_data="adm:home")]]
                     ),

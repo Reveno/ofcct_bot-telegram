@@ -144,6 +144,7 @@
     "broadcast_no_caption": "— (без підпису)",
     "broadcast_sending": "⏳ Надсилаю розсилку…\nПідписників: {total}\n\nМожна користуватися адмін-меню — звіт зʼявиться тут після завершення.",
     "broadcast_sent": "✅ Надіслано {ok} з {total} підписників. Помилок: {errors}.",
+    "broadcast_error_samples": "Деталі (приклади):\n{lines}",
     "broadcast_empty_subscribers": "Немає підписників для розсилки.",
     "stats_body": "📊 Статистика бота\n\n👥 Всього користувачів: {users}\n🔔 Підписників: {subs}\n📩 Звернень всього: {feedback_total}\n❓ Без відповіді: {feedback_open}\n📢 Розсилок: {broadcasts}\n📅 Груп у розкладі: {groups}\n🔄 Змін на цьому тижні: {changes}",
     "upload_expect_xlsx": "Надішліть файл .xlsx з розкладом.",
