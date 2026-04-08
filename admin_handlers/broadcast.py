@@ -16,6 +16,8 @@ from admin_keyboards import admin_main_keyboard, broadcast_confirm_keyboard
 from config import ADMIN_IDS
 from i18n import t
 
+import asyncio
+
 WAIT_TEXT, CONFIRM = range(2)
 
 
@@ -186,32 +188,75 @@ async def broadcast_confirm(
         context.user_data.pop("bc_photo_file_id", None)
         context.user_data.pop("bc_subs", None)
         return ConversationHandler.END
-    ok = 0
-    errors = 0
-    for row in subs:
-        uid = int(row["user_id"])
+
+    # Відправку робимо у фоні, щоб не блокувати інші кнопки адмін-бота.
+    admin_chat_id = q.message.chat_id if q.message else None
+    admin_message_id = q.message.message_id if q.message else None
+    has_photo_preview = bool(q.message and q.message.photo)
+
+    sending_text = t("admin.broadcast_sending", total=len(subs))
+    await _edit_broadcast_reply(q, sending_text)
+
+    async def _run_send() -> None:
+        ok = 0
+        errors = 0
+        for row in subs:
+            uid = int(row["user_id"])
+            try:
+                if photo_id:
+                    await student_app.bot.send_photo(
+                        chat_id=uid,
+                        photo=photo_id,
+                        caption=text or "",
+                    )
+                else:
+                    await student_app.bot.send_message(chat_id=uid, text=text)
+                ok += 1
+            except TelegramError:
+                errors += 1
+            except Exception:
+                errors += 1
+
         try:
-            if photo_id:
-                await student_app.bot.send_photo(
-                    chat_id=uid,
-                    photo=photo_id,
-                    caption=text or "",
+            await db.insert_broadcast(text, user.id, photo_file_id=photo_id)
+        except Exception:
+            # Навіть якщо БД впала — звіт все одно віддамо адміну.
+            pass
+
+        report = t(
+            "admin.broadcast_sent",
+            ok=ok,
+            total=len(subs),
+            errors=errors,
+        )
+        try:
+            if admin_chat_id and admin_message_id:
+                if has_photo_preview:
+                    cap = report if len(report) <= 1024 else report[:1020] + "…"
+                    await context.bot.edit_message_caption(
+                        chat_id=admin_chat_id,
+                        message_id=admin_message_id,
+                        caption=cap,
+                        reply_markup=admin_main_keyboard(),
+                    )
+                else:
+                    await context.bot.edit_message_text(
+                        chat_id=admin_chat_id,
+                        message_id=admin_message_id,
+                        text=report,
+                        reply_markup=admin_main_keyboard(),
+                    )
+            elif admin_chat_id:
+                await context.bot.send_message(
+                    chat_id=admin_chat_id,
+                    text=report,
+                    reply_markup=admin_main_keyboard(),
                 )
-            else:
-                await student_app.bot.send_message(chat_id=uid, text=text)
-            ok += 1
-        except TelegramError:
-            errors += 1
-    await db.insert_broadcast(text, user.id, photo_file_id=photo_id)
-    report = t(
-        "admin.broadcast_sent",
-        ok=ok,
-        total=len(subs),
-        errors=errors,
-    )
-    await _edit_broadcast_reply(
-        q, report, reply_markup=admin_main_keyboard()
-    )
+        except Exception:
+            pass
+
+    context.application.create_task(_run_send())
+
     context.user_data.pop("bc_text", None)
     context.user_data.pop("bc_photo_file_id", None)
     context.user_data.pop("bc_subs", None)
