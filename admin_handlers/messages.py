@@ -128,6 +128,19 @@ async def _send_unanswered_list(
 async def adm_home(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     q = update.callback_query
     await q.answer()
+    # Кнопка може бути натиснута під фото-повідомленням (наприклад, після прев'ю розсилки).
+    # Фото не можна редагувати через edit_message_text, тому в такому разі надсилаємо нове меню.
+    if q.message and getattr(q.message, "photo", None):
+        try:
+            await q.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await context.bot.send_message(
+            chat_id=q.message.chat_id,
+            text=t("admin.menu_welcome"),
+            reply_markup=admin_main_keyboard(),
+        )
+        return
     await q.edit_message_text(
         t("admin.menu_welcome"), reply_markup=admin_main_keyboard()
     )
