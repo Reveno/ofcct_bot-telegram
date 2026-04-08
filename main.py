@@ -22,6 +22,25 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
+logger = logging.getLogger(__name__)
+
+
+async def _error_handler(update, context) -> None:
+    err = getattr(context, "error", None)
+    logger.exception("Unhandled error: %s", err)
+    try:
+        if update and getattr(update, "callback_query", None):
+            q = update.callback_query
+            await q.answer("Сталася помилка. Спробуйте ще раз.", show_alert=True)
+        elif update and getattr(update, "effective_chat", None):
+            chat_id = update.effective_chat.id
+            msg = f"⚠️ Помилка: {type(err).__name__}: {err}" if err else "⚠️ Помилка."
+            if len(msg) > 4000:
+                msg = msg[:3990] + "…"
+            await context.bot.send_message(chat_id=chat_id, text=msg)
+    except Exception:
+        logger.exception("Failed to report error to chat")
+
 
 async def main() -> None:
     await db.init_db()
@@ -29,6 +48,9 @@ async def main() -> None:
 
     student_app = ApplicationBuilder().token(BOT_TOKEN).build()
     admin_app = ApplicationBuilder().token(ADMIN_BOT_TOKEN).build()
+
+    student_app.add_error_handler(_error_handler)
+    admin_app.add_error_handler(_error_handler)
 
     menu.register(student_app)
     schedule.register(student_app)

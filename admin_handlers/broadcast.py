@@ -175,7 +175,7 @@ async def broadcast_confirm(
                 await student_app.bot.send_photo(
                     chat_id=uid,
                     photo=photo_id,
-                    caption=text if text else None,
+                    caption=text or "",
                 )
             else:
                 await student_app.bot.send_message(chat_id=uid, text=text)
