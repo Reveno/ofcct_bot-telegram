@@ -106,6 +106,24 @@ def schedule_days_keyboard(group: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
+def news_list_keyboard(items: list[tuple[int, str]]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for i, (nid, title) in enumerate(items, start=1):
+        short = title if len(title) <= 48 else title[:45] + "…"
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{i}. {short}",
+                    callback_data=f"news:v:{nid}",
+                )
+            ]
+        )
+    rows.append(
+        [InlineKeyboardButton(text=t("common.back"), callback_data="menu:main")]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
 def faq_list_keyboard(items: list[tuple[int, str]]) -> InlineKeyboardMarkup:
     rows = []
     for i, (fid, question) in enumerate(items, start=1):

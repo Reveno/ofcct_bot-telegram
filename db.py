@@ -83,7 +83,9 @@ CREATE TABLE IF NOT EXISTS broadcasts (
     text           TEXT NOT NULL,
     sent_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     sent_by        INTEGER,
-    photo_file_id  TEXT
+    photo_file_id  TEXT,
+    title          TEXT,
+    link_url       TEXT
 );
 
 CREATE TABLE IF NOT EXISTS faq (
@@ -218,12 +220,20 @@ async def init_db() -> None:
                         text           TEXT NOT NULL,
                         sent_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         sent_by        BIGINT,
-                        photo_file_id  TEXT
+                        photo_file_id  TEXT,
+                        title          TEXT,
+                        link_url       TEXT
                     )
                     """
                 )
                 await conn.execute(
                     "ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS photo_file_id TEXT"
+                )
+                await conn.execute(
+                    "ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS title TEXT"
+                )
+                await conn.execute(
+                    "ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS link_url TEXT"
                 )
                 await conn.execute(
                     """
@@ -243,6 +253,7 @@ async def init_db() -> None:
             await _sqlite_conn.commit()
             await _migrate_sqlite_schedule_course()
             await _migrate_sqlite_broadcasts_photo()
+            await _migrate_sqlite_broadcasts_meta()
 
 
 async def _migrate_sqlite_schedule_course() -> None:
@@ -267,6 +278,19 @@ async def _migrate_sqlite_broadcasts_photo() -> None:
     except aiosqlite.OperationalError as e:
         if "duplicate column" not in str(e).lower():
             raise
+
+
+async def _migrate_sqlite_broadcasts_meta() -> None:
+    assert _sqlite_conn
+    for col in ("title", "link_url"):
+        try:
+            await _sqlite_conn.execute(
+                f"ALTER TABLE broadcasts ADD COLUMN {col} TEXT"
+            )
+            await _sqlite_conn.commit()
+        except aiosqlite.OperationalError as e:
+            if "duplicate column" not in str(e).lower():
+                raise
 
 
 async def close_db() -> None:
@@ -1086,30 +1110,36 @@ async def count_unanswered() -> int:
 
 
 async def insert_broadcast(
-    text: str, sent_by: int, photo_file_id: str | None = None
+    text: str,
+    sent_by: int,
+    photo_file_id: str | None = None,
+    title: str | None = None,
+    link_url: str | None = None,
 ) -> int:
     if USE_POSTGRES:
         assert _pg_pool
         async with _pg_pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO broadcasts (text, sent_by, photo_file_id)
-                VALUES ($1, $2, $3)
+                INSERT INTO broadcasts (text, sent_by, photo_file_id, title, link_url)
+                VALUES ($1, $2, $3, $4, $5)
                 RETURNING id
                 """,
                 text,
                 sent_by,
                 photo_file_id,
+                title,
+                link_url,
             )
             return int(row["id"])
     assert _sqlite_conn
     cur = await _sqlite_conn.execute(
         """
-        INSERT INTO broadcasts (text, sent_by, photo_file_id)
-        VALUES (?, ?, ?)
+        INSERT INTO broadcasts (text, sent_by, photo_file_id, title, link_url)
+        VALUES (?, ?, ?, ?, ?)
         RETURNING id
         """,
-        (text, sent_by, photo_file_id),
+        (text, sent_by, photo_file_id, title, link_url),
     )
     row = await cur.fetchone()
     await _sqlite_conn.commit()
@@ -1122,7 +1152,7 @@ async def get_recent_broadcasts(limit: int = 5) -> list[dict[str, Any]]:
         async with _pg_pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT id, text, sent_at, sent_by, photo_file_id
+                SELECT id, text, sent_at, sent_by, photo_file_id, title, link_url
                 FROM broadcasts
                 ORDER BY sent_at DESC
                 LIMIT $1
@@ -1133,7 +1163,7 @@ async def get_recent_broadcasts(limit: int = 5) -> list[dict[str, Any]]:
     assert _sqlite_conn
     async with _sqlite_conn.execute(
         """
-        SELECT id, text, sent_at, sent_by, photo_file_id
+        SELECT id, text, sent_at, sent_by, photo_file_id, title, link_url
         FROM broadcasts
         ORDER BY sent_at DESC
         LIMIT ?
@@ -1154,6 +1184,30 @@ async def count_broadcasts() -> int:
     async with _sqlite_conn.execute("SELECT COUNT(*) FROM broadcasts") as cur:
         row = await cur.fetchone()
         return int(row[0]) if row else 0
+
+
+async def get_broadcast_by_id(broadcast_id: int) -> dict[str, Any] | None:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, text, sent_at, sent_by, photo_file_id, title, link_url
+                FROM broadcasts WHERE id = $1
+                """,
+                broadcast_id,
+            )
+            return _row_to_dict(row) if row else None
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        """
+        SELECT id, text, sent_at, sent_by, photo_file_id, title, link_url
+        FROM broadcasts WHERE id = ?
+        """,
+        (broadcast_id,),
+    ) as cur:
+        row = await cur.fetchone()
+        return _row_to_dict(row) if row else None
 
 
 async def delete_broadcast(broadcast_id: int) -> bool:
@@ -1235,6 +1289,146 @@ async def seed_faq() -> None:
         entries,
     )
     await _sqlite_conn.commit()
+
+
+async def migrate_faq_content() -> None:
+    """Видаляє застарілі питання та оновлює контакти (ідемпотентно)."""
+    path = Path(__file__).resolve().parent / "locales" / "uk.json"
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    mig = data.get("faq_migration") or {}
+    remove_list = mig.get("remove_questions") or []
+    old_contact_q = mig.get("contact_old_question")
+    new_contact_q = mig.get("contact_new_question")
+    new_contact_a = mig.get("contact_new_answer")
+
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            for q in remove_list:
+                await conn.execute("DELETE FROM faq WHERE question = $1", q)
+            if old_contact_q and new_contact_q and new_contact_a is not None:
+                await conn.execute(
+                    """
+                    UPDATE faq SET question = $2, answer = $3
+                    WHERE question = $1
+                    """,
+                    old_contact_q,
+                    new_contact_q,
+                    new_contact_a,
+                )
+        return
+
+    assert _sqlite_conn
+    for q in remove_list:
+        await _sqlite_conn.execute("DELETE FROM faq WHERE question = ?", (q,))
+    if old_contact_q and new_contact_q and new_contact_a is not None:
+        await _sqlite_conn.execute(
+            """
+            UPDATE faq SET question = ?, answer = ?
+            WHERE question = ?
+            """,
+            (new_contact_q, new_contact_a, old_contact_q),
+        )
+    await _sqlite_conn.commit()
+
+
+async def insert_faq(question: str, answer: str, order_index: int = 0) -> int:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO faq (question, answer, order_index)
+                VALUES ($1, $2, $3)
+                RETURNING id
+                """,
+                question,
+                answer,
+                order_index,
+            )
+            return int(row["id"])
+    assert _sqlite_conn
+    cur = await _sqlite_conn.execute(
+        """
+        INSERT INTO faq (question, answer, order_index)
+        VALUES (?, ?, ?)
+        RETURNING id
+        """,
+        (question, answer, order_index),
+    )
+    row = await cur.fetchone()
+    await _sqlite_conn.commit()
+    return int(row[0])
+
+
+async def update_faq(
+    faq_id: int,
+    *,
+    question: str | None = None,
+    answer: str | None = None,
+    order_index: int | None = None,
+) -> None:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            if question is not None:
+                await conn.execute(
+                    "UPDATE faq SET question = $1 WHERE id = $2", question, faq_id
+                )
+            if answer is not None:
+                await conn.execute(
+                    "UPDATE faq SET answer = $1 WHERE id = $2", answer, faq_id
+                )
+            if order_index is not None:
+                await conn.execute(
+                    "UPDATE faq SET order_index = $1 WHERE id = $2",
+                    order_index,
+                    faq_id,
+                )
+        return
+    assert _sqlite_conn
+    if question is not None:
+        await _sqlite_conn.execute(
+            "UPDATE faq SET question = ? WHERE id = ?", (question, faq_id)
+        )
+    if answer is not None:
+        await _sqlite_conn.execute(
+            "UPDATE faq SET answer = ? WHERE id = ?", (answer, faq_id)
+        )
+    if order_index is not None:
+        await _sqlite_conn.execute(
+            "UPDATE faq SET order_index = ? WHERE id = ?", (order_index, faq_id)
+        )
+    await _sqlite_conn.commit()
+
+
+async def delete_faq(faq_id: int) -> bool:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "DELETE FROM faq WHERE id = $1 RETURNING id", faq_id
+            )
+            return row is not None
+    assert _sqlite_conn
+    cur = await _sqlite_conn.execute("DELETE FROM faq WHERE id = ?", (faq_id,))
+    await _sqlite_conn.commit()
+    return cur.rowcount > 0
+
+
+async def get_next_faq_order_index() -> int:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            v = await conn.fetchval("SELECT COALESCE(MAX(order_index), -1) FROM faq")
+            return int(v or -1) + 1
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        "SELECT COALESCE(MAX(order_index), -1) FROM faq"
+    ) as cur:
+        row = await cur.fetchone()
+        return int(row[0] if row else -1) + 1
 
 
 def _faq_seed_tuples() -> list[tuple[str, str, int]]:

@@ -4,7 +4,15 @@ import logging
 from telegram.ext import ApplicationBuilder
 
 import db
-from admin_handlers import broadcast, messages, retakes_mgmt, schedule_mgmt, stats
+from admin_handlers import (
+    broadcast,
+    faq_mgmt,
+    messages,
+    news_mgmt,
+    retakes_mgmt,
+    schedule_mgmt,
+    stats,
+)
 from config import ADMIN_BOT_TOKEN, BOT_TOKEN
 from handlers import (
     faq,
@@ -45,6 +53,7 @@ async def _error_handler(update, context) -> None:
 async def main() -> None:
     await db.init_db()
     await db.seed_faq()
+    await db.migrate_faq_content()
 
     student_app = ApplicationBuilder().token(BOT_TOKEN).build()
     admin_app = ApplicationBuilder().token(ADMIN_BOT_TOKEN).build()
@@ -63,6 +72,8 @@ async def main() -> None:
     menu.register_main_callback(student_app)
     messages.register(admin_app, student_app)
     broadcast.register(admin_app, student_app)
+    faq_mgmt.register(admin_app)
+    news_mgmt.register(admin_app, student_app)
     schedule_mgmt.register(admin_app)
     retakes_mgmt.register(admin_app)
     stats.register(admin_app)

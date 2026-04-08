@@ -245,7 +245,9 @@ async def broadcast_confirm(
                 errors += 1
 
         try:
-            await db.insert_broadcast(text, user.id, photo_file_id=photo_id)
+            await db.insert_broadcast(
+                text, user.id, photo_file_id=photo_id, title=None, link_url=None
+            )
         except Exception:
             # Навіть якщо БД впала — звіт все одно віддамо адміну.
             pass
@@ -340,20 +342,36 @@ async def _render_news_manage_panel(q) -> None:
                 [
                     [
                         InlineKeyboardButton(
+                            text=t("admin.news_compose"),
+                            callback_data="adm:news_compose",
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
                             text=t("common.back"),
                             callback_data="adm:home",
                         )
-                    ]
+                    ],
                 ]
             ),
         )
         return
     lines = [t("admin.news_manage_title")]
-    kb_rows: list[list[InlineKeyboardButton]] = []
+    kb_rows: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(
+                text=t("admin.news_compose"),
+                callback_data="adm:news_compose",
+            )
+        ]
+    ]
     for r in rows:
         bid = int(r["id"])
         dt = _fmt_news_admin_dt(r.get("sent_at"))
+        tit = (r.get("title") or "").strip()
         preview = (r.get("text") or "").strip().replace("\n", " ")
+        if tit:
+            preview = f"{tit} — {preview}" if preview else tit
         if len(preview) > 48:
             preview = preview[:45] + "…"
         icon = "📷" if r.get("photo_file_id") else "📄"
