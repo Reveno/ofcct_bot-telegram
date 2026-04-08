@@ -69,6 +69,10 @@ async def broadcast_menu_cb(
         return ConversationHandler.END
     q = update.callback_query
     await q.answer()
+    # Запам'ятовуємо повідомлення, яке редагуємо під меню/звіт.
+    if q.message:
+        context.user_data["bc_origin_chat_id"] = q.message.chat_id
+        context.user_data["bc_origin_message_id"] = q.message.message_id
     context.user_data.pop("bc_text", None)
     context.user_data.pop("bc_photo_file_id", None)
     await q.edit_message_text(t("admin.broadcast_start"))
@@ -138,11 +142,13 @@ async def broadcast_receive_content(
         )
         if len(cap) > 1024:
             cap = cap[:1020] + "…"
-        await msg.reply_photo(
+        preview_msg = await msg.reply_photo(
             photo=photo_id,
             caption=cap,
             reply_markup=broadcast_confirm_keyboard(),
         )
+        context.user_data["bc_preview_chat_id"] = preview_msg.chat_id
+        context.user_data["bc_preview_message_id"] = preview_msg.message_id
     else:
         preview = t(
             "admin.broadcast_preview",
@@ -190,12 +196,33 @@ async def broadcast_confirm(
         return ConversationHandler.END
 
     # Відправку робимо у фоні, щоб не блокувати інші кнопки адмін-бота.
-    admin_chat_id = q.message.chat_id if q.message else None
-    admin_message_id = q.message.message_id if q.message else None
-    has_photo_preview = bool(q.message and q.message.photo)
+    # Звіт/меню завжди оновлюємо в оригінальному текстовому повідомленні (а не в фото-прев'ю),
+    # інакше інші адмін-кнопки, які використовують edit_message_text, "ламаються".
+    admin_chat_id = context.user_data.get("bc_origin_chat_id")
+    admin_message_id = context.user_data.get("bc_origin_message_id")
+    preview_chat_id = context.user_data.get("bc_preview_chat_id")
+    preview_message_id = context.user_data.get("bc_preview_message_id")
 
     sending_text = t("admin.broadcast_sending", total=len(subs))
-    await _edit_broadcast_reply(q, sending_text)
+    # На прев'ю (якщо це фото) залишимо інформативний підпис і кнопку "Назад".
+    await _edit_broadcast_reply(
+        q,
+        sending_text,
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton(text=t("common.back"), callback_data="adm:home")]]
+        ),
+    )
+    # А меню/звіт — в окремому текстовому повідомленні.
+    if admin_chat_id and admin_message_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=int(admin_chat_id),
+                message_id=int(admin_message_id),
+                text=sending_text,
+                reply_markup=admin_main_keyboard(),
+            )
+        except Exception:
+            pass
 
     async def _run_send() -> None:
         ok = 0
@@ -230,27 +257,30 @@ async def broadcast_confirm(
             errors=errors,
         )
         try:
+            # Оновлюємо текстове повідомлення меню.
             if admin_chat_id and admin_message_id:
-                if has_photo_preview:
-                    cap = report if len(report) <= 1024 else report[:1020] + "…"
-                    await context.bot.edit_message_caption(
-                        chat_id=admin_chat_id,
-                        message_id=admin_message_id,
-                        caption=cap,
-                        reply_markup=admin_main_keyboard(),
-                    )
-                else:
-                    await context.bot.edit_message_text(
-                        chat_id=admin_chat_id,
-                        message_id=admin_message_id,
-                        text=report,
-                        reply_markup=admin_main_keyboard(),
-                    )
-            elif admin_chat_id:
-                await context.bot.send_message(
-                    chat_id=admin_chat_id,
+                await context.bot.edit_message_text(
+                    chat_id=int(admin_chat_id),
+                    message_id=int(admin_message_id),
                     text=report,
                     reply_markup=admin_main_keyboard(),
+                )
+            elif admin_chat_id:
+                await context.bot.send_message(
+                    chat_id=int(admin_chat_id),
+                    text=report,
+                    reply_markup=admin_main_keyboard(),
+                )
+            # Оновлюємо фото-прев'ю без меню (щоб на ньому не натискали інші кнопки).
+            if preview_chat_id and preview_message_id:
+                cap = report if len(report) <= 1024 else report[:1020] + "…"
+                await context.bot.edit_message_caption(
+                    chat_id=int(preview_chat_id),
+                    message_id=int(preview_message_id),
+                    caption=cap,
+                    reply_markup=InlineKeyboardMarkup(
+                        [[InlineKeyboardButton(text=t("common.back"), callback_data="adm:home")]]
+                    ),
                 )
         except Exception:
             pass
@@ -260,6 +290,10 @@ async def broadcast_confirm(
     context.user_data.pop("bc_text", None)
     context.user_data.pop("bc_photo_file_id", None)
     context.user_data.pop("bc_subs", None)
+    context.user_data.pop("bc_origin_chat_id", None)
+    context.user_data.pop("bc_origin_message_id", None)
+    context.user_data.pop("bc_preview_chat_id", None)
+    context.user_data.pop("bc_preview_message_id", None)
     return ConversationHandler.END
 
 
