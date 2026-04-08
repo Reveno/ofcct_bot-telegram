@@ -35,6 +35,26 @@ def _admin_only(user_id: int | None) -> bool:
     return user_id is not None and user_id in ADMIN_IDS
 
 
+async def broadcast_go_home(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    """Дозволяє вийти з діалогу розсилки кнопкою «Назад» у будь-який момент."""
+    user = update.effective_user
+    q = update.callback_query
+    if q:
+        if not _admin_only(user.id if user else None):
+            await q.answer(t("admin.access_denied_short"), show_alert=True)
+            return ConversationHandler.END
+        await q.answer()
+        context.user_data.pop("bc_text", None)
+        context.user_data.pop("bc_photo_file_id", None)
+        context.user_data.pop("bc_subs", None)
+        await _edit_broadcast_reply(
+            q, t("admin.menu_welcome"), reply_markup=admin_main_keyboard()
+        )
+    return ConversationHandler.END
+
+
 async def broadcast_menu_cb(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
@@ -325,14 +345,21 @@ def register(app, student_app) -> None:
         ],
         states={
             WAIT_TEXT: [
+                CallbackQueryHandler(broadcast_go_home, pattern=r"^adm:home$"),
                 MessageHandler(
                     (filters.PHOTO | filters.TEXT) & ~filters.COMMAND,
                     broadcast_receive_content,
                 )
             ],
-            CONFIRM: [CallbackQueryHandler(confirm_wrap, pattern=r"^bc:(yes|no)$")],
+            CONFIRM: [
+                CallbackQueryHandler(broadcast_go_home, pattern=r"^adm:home$"),
+                CallbackQueryHandler(confirm_wrap, pattern=r"^bc:(yes|no)$"),
+            ],
         },
-        fallbacks=[CommandHandler("cancel", broadcast_cancel)],
+        fallbacks=[
+            CommandHandler("cancel", broadcast_cancel),
+            CallbackQueryHandler(broadcast_go_home, pattern=r"^adm:home$"),
+        ],
         name="broadcast_conv",
         per_chat=True,
         per_user=True,
