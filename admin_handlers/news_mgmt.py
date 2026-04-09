@@ -163,7 +163,8 @@ async def news_confirm(
         await q.edit_message_text(t("errors.generic"))
         return ConversationHandler.END
 
-    html_msg = _format_news_html(title, body, link)
+    inner = _format_news_html(title, body, link)
+    html_msg = f"{t('news.push_heading')}\n\n{inner}"
     admin_chat_id = q.message.chat_id if q.message else None
     admin_message_id = q.message.message_id if q.message else None
 

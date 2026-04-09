@@ -45,7 +45,15 @@ async def receive_feedback_text(
         await update.message.reply_text(t("feedback.prompt"))
         return WAITING_TEXT
     uid = update.effective_user.id
+    remain = await db.get_feedback_cooldown_remaining_sec(uid)
+    if remain > 0:
+        minutes = max(1, (remain + 59) // 60)
+        await update.message.reply_text(
+            t("feedback.rate_limited", minutes=minutes)
+        )
+        return WAITING_TEXT
     fid = await db.insert_feedback(uid, text)
+    await db.touch_user_last_feedback(uid)
     await update.message.reply_text(
         t("feedback.saved"), reply_markup=main_menu_keyboard()
     )

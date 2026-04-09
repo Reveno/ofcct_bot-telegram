@@ -1,6 +1,13 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
 
 from i18n import t
+
+_FAQ_BUTTON_EMOJIS = ("✨", "⚡", "💰", "📊", "📋", "🎓", "❓", "📌")
 
 
 def main_menu_keyboard() -> InlineKeyboardMarkup:
@@ -100,10 +107,42 @@ def schedule_days_keyboard(group: str) -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(
                 text=t("common.back"), callback_data="sch:back_groups"
-            )
+            ),
+            InlineKeyboardButton(
+                text=t("schedule.to_main_menu"), callback_data="menu:main"
+            ),
         ]
     )
     return InlineKeyboardMarkup(rows)
+
+
+def faq_reply_keyboard(button_labels: list[str]) -> ReplyKeyboardMarkup:
+    """Дві кнопки в рядку + ряд «Головне меню» (як reply-клавіатура)."""
+    keyboard: list[list[KeyboardButton]] = []
+    row: list[KeyboardButton] = []
+    for label in button_labels:
+        row.append(KeyboardButton(label))
+        if len(row) >= 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    keyboard.append([KeyboardButton(t("faq.reply_back_to_menu"))])
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+
+def faq_button_label(question: str, index: int) -> str:
+    """Емодзі + пробіл + текст (обмеження ~64 байти для Telegram)."""
+    emo = _FAQ_BUTTON_EMOJIS[index % len(_FAQ_BUTTON_EMOJIS)]
+    q = (question or "").strip()
+    prefix = f"{emo} "
+    max_bytes = 64
+    enc = prefix.encode("utf-8")
+    if len(enc) + len(q.encode("utf-8")) <= max_bytes:
+        return prefix + q
+    room = max_bytes - len(enc) - 1
+    cut = q.encode("utf-8")[:room].decode("utf-8", errors="ignore")
+    return prefix + cut + "…"
 
 
 def news_list_keyboard(items: list[tuple[int, str]]) -> InlineKeyboardMarkup:

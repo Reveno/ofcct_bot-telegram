@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -31,7 +32,8 @@ CREATE TABLE IF NOT EXISTS users (
     user_id     INTEGER PRIMARY KEY,
     username    TEXT,
     subscribed  INTEGER DEFAULT 0,
-    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_feedback_at TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS schedule (
@@ -150,7 +152,8 @@ async def init_db() -> None:
                         user_id     BIGINT PRIMARY KEY,
                         username    TEXT,
                         subscribed  INTEGER DEFAULT 0,
-                        created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        last_feedback_at TIMESTAMP
                     )
                     """
                 )
@@ -245,6 +248,9 @@ async def init_db() -> None:
                     )
                     """
                 )
+                await conn.execute(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_feedback_at TIMESTAMP"
+                )
         else:
             db_path = Path(SQLITE_PATH)
             _sqlite_conn = await aiosqlite.connect(str(db_path))
@@ -254,6 +260,7 @@ async def init_db() -> None:
             await _migrate_sqlite_schedule_course()
             await _migrate_sqlite_broadcasts_photo()
             await _migrate_sqlite_broadcasts_meta()
+            await _migrate_sqlite_users_last_feedback()
 
 
 async def _migrate_sqlite_schedule_course() -> None:
@@ -291,6 +298,18 @@ async def _migrate_sqlite_broadcasts_meta() -> None:
         except aiosqlite.OperationalError as e:
             if "duplicate column" not in str(e).lower():
                 raise
+
+
+async def _migrate_sqlite_users_last_feedback() -> None:
+    assert _sqlite_conn
+    try:
+        await _sqlite_conn.execute(
+            "ALTER TABLE users ADD COLUMN last_feedback_at TIMESTAMP"
+        )
+        await _sqlite_conn.commit()
+    except aiosqlite.OperationalError as e:
+        if "duplicate column" not in str(e).lower():
+            raise
 
 
 async def close_db() -> None:
@@ -344,6 +363,87 @@ async def upsert_user(user_id: int, username: str | None) -> None:
             (user_id, un),
         )
         await _sqlite_conn.commit()
+
+
+async def get_feedback_cooldown_remaining_sec(user_id: int) -> int:
+    """Секунди до дозволу наступного звернення (0 = можна надсилати)."""
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT last_feedback_at FROM users WHERE user_id = $1
+                """,
+                user_id,
+            )
+            if not row or row["last_feedback_at"] is None:
+                return 0
+            raw = row["last_feedback_at"]
+            if isinstance(raw, datetime):
+                at = raw
+                if at.tzinfo is None:
+                    at = at.replace(tzinfo=timezone.utc)
+            else:
+                return 0
+            now = datetime.now(timezone.utc)
+            elapsed = (now - at).total_seconds()
+            cooldown = 3600.0
+            if elapsed >= cooldown:
+                return 0
+            return int(cooldown - elapsed)
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        "SELECT last_feedback_at FROM users WHERE user_id = ?", (user_id,)
+    ) as cur:
+        row = await cur.fetchone()
+    if not row or row[0] is None:
+        return 0
+    raw = row[0]
+    if isinstance(raw, str):
+        try:
+            at = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return 0
+    elif isinstance(raw, datetime):
+        at = raw
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+    else:
+        return 0
+    now = datetime.now(timezone.utc)
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    elapsed = (now - at).total_seconds()
+    cooldown = 3600.0
+    if elapsed >= cooldown:
+        return 0
+    return int(cooldown - elapsed)
+
+
+async def touch_user_last_feedback(user_id: int) -> None:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO users (user_id, username, last_feedback_at)
+                VALUES ($1, '', CURRENT_TIMESTAMP)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    last_feedback_at = CURRENT_TIMESTAMP
+                """,
+                user_id,
+            )
+        return
+    assert _sqlite_conn
+    await _sqlite_conn.execute(
+        """
+        INSERT INTO users (user_id, username, last_feedback_at)
+        VALUES (?, '', CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id) DO UPDATE SET last_feedback_at = CURRENT_TIMESTAMP
+        """,
+        (user_id,),
+    )
+    await _sqlite_conn.commit()
 
 
 async def get_all_subscribers() -> list[dict[str, Any]]:
@@ -1301,6 +1401,7 @@ async def migrate_faq_content() -> None:
     old_contact_q = mig.get("contact_old_question")
     new_contact_q = mig.get("contact_new_question")
     new_contact_a = mig.get("contact_new_answer")
+    add_entries = mig.get("add_if_missing") or []
 
     if USE_POSTGRES:
         assert _pg_pool
@@ -1317,6 +1418,27 @@ async def migrate_faq_content() -> None:
                     new_contact_q,
                     new_contact_a,
                 )
+            for entry in add_entries:
+                if not isinstance(entry, dict):
+                    continue
+                qn = (entry.get("question") or "").strip()
+                an = (entry.get("answer") or "").strip()
+                if not qn or not an:
+                    continue
+                oi = int(entry.get("order_index", 0))
+                n = await conn.fetchval(
+                    "SELECT COUNT(*) FROM faq WHERE question = $1", qn
+                )
+                if int(n or 0) == 0:
+                    await conn.execute(
+                        """
+                        INSERT INTO faq (question, answer, order_index)
+                        VALUES ($1, $2, $3)
+                        """,
+                        qn,
+                        an,
+                        oi,
+                    )
         return
 
     assert _sqlite_conn
@@ -1330,6 +1452,26 @@ async def migrate_faq_content() -> None:
             """,
             (new_contact_q, new_contact_a, old_contact_q),
         )
+    for entry in add_entries:
+        if not isinstance(entry, dict):
+            continue
+        qn = (entry.get("question") or "").strip()
+        an = (entry.get("answer") or "").strip()
+        if not qn or not an:
+            continue
+        oi = int(entry.get("order_index", 0))
+        async with _sqlite_conn.execute(
+            "SELECT COUNT(*) FROM faq WHERE question = ?", (qn,)
+        ) as cur:
+            row = await cur.fetchone()
+        if row and row[0] == 0:
+            await _sqlite_conn.execute(
+                """
+                INSERT INTO faq (question, answer, order_index)
+                VALUES (?, ?, ?)
+                """,
+                (qn, an, oi),
+            )
     await _sqlite_conn.commit()
 
 
