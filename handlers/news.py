@@ -1,12 +1,35 @@
 import html
 from datetime import datetime
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import CallbackQueryHandler, ContextTypes
+from telegram import Update
+from telegram.ext import (
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    ConversationHandler,
+    MessageHandler,
+    filters,
+)
 
 import db
 from i18n import t
-from keyboards import back_to_menu_keyboard, news_list_keyboard
+from keyboards import (
+    main_menu_reply_keyboard,
+    main_menu_text_pattern,
+    news_detail_reply_keyboard,
+    news_list_reply_keyboard,
+    reply_indexed_label,
+)
+
+NEWS_LIST, NEWS_DETAIL = range(2)
+
+
+def _back_label() -> str:
+    return t("common.back")
+
+
+def _menu_label() -> str:
+    return t("schedule.to_main_menu")
 
 
 def _fmt_dt(val) -> str:
@@ -57,86 +80,179 @@ def _format_news_detail_html(row: dict) -> str:
     return "\n\n".join(parts)
 
 
-async def _news_list_payload() -> tuple[str, object]:
+async def _news_end_main(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    context.user_data.pop("news_items", None)
+    context.user_data.pop("news_label_to_id", None)
+    msg = update.effective_message
+    if msg:
+        await msg.reply_text(
+            t("menu.welcome"),
+            reply_markup=main_menu_reply_keyboard(),
+        )
+    return ConversationHandler.END
+
+
+async def _news_open_list(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    q = update.callback_query
+    if q:
+        await q.answer()
+
+    context.user_data.pop("news_items", None)
+    context.user_data.pop("news_label_to_id", None)
+
     rows = await db.get_recent_broadcasts(15)
     if not rows:
-        return t("news.empty"), back_to_menu_keyboard()
+        text = t("news.empty")
+        if update.message:
+            await update.message.reply_text(
+                text,
+                reply_markup=main_menu_reply_keyboard(),
+            )
+        elif q and q.message:
+            await q.message.reply_text(
+                text,
+                reply_markup=main_menu_reply_keyboard(),
+            )
+        return ConversationHandler.END
+
     items = [(int(r["id"]), _news_title(r)) for r in rows]
-    return t("news.list_title"), news_list_keyboard(items)
+    context.user_data["news_items"] = items
+    context.user_data["news_label_to_id"] = {
+        reply_indexed_label(i, title): nid
+        for i, (nid, title) in enumerate(items, start=1)
+    }
+
+    title_text = t("news.list_title")
+    kb = news_list_reply_keyboard(items)
+    if update.message:
+        await update.message.reply_text(title_text, reply_markup=kb)
+    elif q and q.message:
+        await q.message.reply_text(title_text, reply_markup=kb)
+    else:
+        return ConversationHandler.END
+    return NEWS_LIST
 
 
-async def _show_news_list(
+async def _news_list_text(
     update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    q = update.callback_query
-    await q.answer()
-    text, kb = await _news_list_payload()
-    await q.edit_message_text(text, reply_markup=kb)
+) -> int:
+    if not update.message or not update.message.text:
+        return NEWS_LIST
+    text = update.message.text.strip()
+    if text in (_back_label(), _menu_label()):
+        return await _news_end_main(update, context)
 
+    label_to_id = context.user_data.get("news_label_to_id") or {}
+    nid = label_to_id.get(text)
+    if nid is None:
+        await update.message.reply_text(t("schedule.use_keyboard"))
+        return NEWS_LIST
 
-async def open_news(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    await _show_news_list(update, context)
-
-
-async def open_news_from_message(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    if not update.message:
-        return
-    text, kb = await _news_list_payload()
-    await update.message.reply_text(text, reply_markup=kb)
-
-
-async def view_news_item(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    q = update.callback_query
-    await q.answer()
-    try:
-        nid = int((q.data or "").split(":")[2])
-    except (ValueError, IndexError):
-        await q.edit_message_text(
-            t("news.empty"), reply_markup=back_to_menu_keyboard()
-        )
-        return
-    row = await db.get_broadcast_by_id(nid)
+    row = await db.get_broadcast_by_id(int(nid))
     if not row:
-        await q.edit_message_text(
-            t("news.empty"), reply_markup=back_to_menu_keyboard()
+        await update.message.reply_text(
+            t("news.empty"),
+            reply_markup=main_menu_reply_keyboard(),
         )
-        return
-    text = _format_news_detail_html(row)
-    kb = InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    text=t("news.back_to_list"), callback_data="news:list"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text=t("common.back"), callback_data="menu:main"
-                ),
-                InlineKeyboardButton(
-                    text=t("schedule.to_main_menu"), callback_data="menu:main"
-                ),
-            ],
-        ]
-    )
-    await q.edit_message_text(
-        text,
-        reply_markup=kb,
+        return ConversationHandler.END
+
+    body = _format_news_detail_html(row)
+    await update.message.reply_text(
+        body,
+        reply_markup=news_detail_reply_keyboard(),
         parse_mode="HTML",
         disable_web_page_preview=False,
     )
+    return NEWS_DETAIL
+
+
+async def _news_detail_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    if not update.message or not update.message.text:
+        return NEWS_DETAIL
+    text = update.message.text.strip()
+    if text == t("news.back_to_list"):
+        items = context.user_data.get("news_items")
+        if not items:
+            return await _news_end_main(update, context)
+        await update.message.reply_text(
+            t("news.list_title"),
+            reply_markup=news_list_reply_keyboard(items),
+        )
+        return NEWS_LIST
+    if text in (_back_label(), _menu_label()):
+        return await _news_end_main(update, context)
+
+    await update.message.reply_text(t("schedule.use_keyboard"))
+    return NEWS_DETAIL
+
+
+async def _news_cancel(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    if update.message:
+        await update.message.reply_text(
+            t("common.conversation_cancelled"),
+            reply_markup=main_menu_reply_keyboard(),
+        )
+    context.user_data.pop("news_items", None)
+    context.user_data.pop("news_label_to_id", None)
+    return ConversationHandler.END
+
+
+async def _news_main_cb(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    q = update.callback_query
+    if q and q.message:
+        await q.answer()
+        try:
+            await q.edit_message_text(t("menu.welcome"))
+        except Exception:
+            pass
+        await q.message.reply_text(
+            t("menu.reply_menu_visible"),
+            reply_markup=main_menu_reply_keyboard(),
+        )
+    context.user_data.pop("news_items", None)
+    context.user_data.pop("news_label_to_id", None)
+    return ConversationHandler.END
 
 
 def register(app) -> None:
-    app.add_handler(
-        CallbackQueryHandler(open_news, pattern=r"^(menu:news|news:list)$")
+    conv = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(
+                _news_open_list, pattern=r"^(menu:news|news:list)$"
+            ),
+            MessageHandler(
+                filters.TEXT
+                & ~filters.COMMAND
+                & filters.Regex(main_menu_text_pattern("menu.news")),
+                _news_open_list,
+            ),
+        ],
+        states={
+            NEWS_LIST: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, _news_list_text),
+                CallbackQueryHandler(_news_main_cb, pattern=r"^menu:main$"),
+            ],
+            NEWS_DETAIL: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, _news_detail_text
+                ),
+                CallbackQueryHandler(_news_main_cb, pattern=r"^menu:main$"),
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", _news_cancel)],
+        name="news_conv",
+        per_chat=True,
+        per_user=True,
+        allow_reentry=True,
     )
-    app.add_handler(
-        CallbackQueryHandler(view_news_item, pattern=r"^news:v:\d+$")
-    )
+    app.add_handler(conv)

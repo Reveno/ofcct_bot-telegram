@@ -12,7 +12,11 @@ import db
 from admin_keyboards import admin_reply_feedback_keyboard
 from config import ADMIN_CHAT_ID
 from i18n import t
-from keyboards import main_menu_reply_keyboard, main_menu_text_pattern
+from keyboards import (
+    all_main_menu_button_texts,
+    main_menu_reply_keyboard,
+    main_menu_text_pattern,
+)
 
 WAITING_TEXT = 1
 
@@ -48,12 +52,20 @@ async def receive_feedback_text(
     if not text.strip():
         await update.message.reply_text(t("feedback.prompt"))
         return WAITING_TEXT
+    stripped = text.strip()
+    if stripped in all_main_menu_button_texts():
+        await update.message.reply_text(
+            t("menu.welcome"),
+            reply_markup=main_menu_reply_keyboard(),
+        )
+        return ConversationHandler.END
     uid = update.effective_user.id
     remain = await db.get_feedback_cooldown_remaining_sec(uid)
     if remain > 0:
         minutes = max(1, (remain + 59) // 60)
         await update.message.reply_text(
-            t("feedback.rate_limited", minutes=minutes)
+            t("feedback.rate_limited", minutes=minutes),
+            reply_markup=main_menu_reply_keyboard(),
         )
         return WAITING_TEXT
     fid = await db.insert_feedback(uid, text)
@@ -101,6 +113,10 @@ async def feedback_exit_main(
             await q.edit_message_text(t("menu.welcome"))
         except Exception:
             pass
+        await q.message.reply_text(
+            t("menu.reply_menu_visible"),
+            reply_markup=main_menu_reply_keyboard(),
+        )
     return ConversationHandler.END
 
 

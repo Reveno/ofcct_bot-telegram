@@ -1,11 +1,6 @@
 import re
 
-from telegram import (
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    KeyboardButton,
-    ReplyKeyboardMarkup,
-)
+from telegram import KeyboardButton, ReplyKeyboardMarkup
 
 from i18n import t
 
@@ -54,84 +49,85 @@ def all_main_menu_button_texts() -> frozenset[str]:
     return frozenset(t(k) for k in MAIN_MENU_I18N_KEYS)
 
 
-def back_to_menu_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
+def nav_reply_keyboard() -> ReplyKeyboardMarkup:
+    """Останній ряд: назад + головне меню (reply)."""
+    return ReplyKeyboardMarkup(
         [
             [
-                InlineKeyboardButton(
-                    text=t("common.back"), callback_data="menu:main"
-                ),
-                InlineKeyboardButton(
-                    text=t("schedule.to_main_menu"), callback_data="menu:main"
-                ),
+                KeyboardButton(t("common.back")),
+                KeyboardButton(t("schedule.to_main_menu")),
             ]
-        ]
+        ],
+        resize_keyboard=True,
     )
 
 
-def schedule_courses_keyboard(
+def schedule_view_reply_keyboard() -> ReplyKeyboardMarkup:
+    """Після перегляду розкладу: до вибору дня + головне меню."""
+    return ReplyKeyboardMarkup(
+        [
+            [
+                KeyboardButton(t("schedule.back_to_weekdays")),
+                KeyboardButton(t("schedule.to_main_menu")),
+            ]
+        ],
+        resize_keyboard=True,
+    )
+
+
+def schedule_course_row_label(n: int, *, cohort_mode: bool) -> str:
+    if n == 0:
+        return (
+            t("schedule.cohort_other")
+            if cohort_mode
+            else t("schedule.course_other")
+        )
+    if cohort_mode:
+        return t("schedule.cohort_label", n=n)
+    return t("schedule.course_label", n=n)
+
+
+def schedule_courses_reply_keyboard(
     course_nums: list[int], *, cohort_mode: bool = False
-) -> InlineKeyboardMarkup:
-    rows = []
+) -> ReplyKeyboardMarkup:
+    rows: list[list[KeyboardButton]] = []
     for c in course_nums:
-        if c == 0:
-            label = (
-                t("schedule.cohort_other")
-                if cohort_mode
-                else t("schedule.course_other")
-            )
-        elif cohort_mode:
-            label = t("schedule.cohort_label", n=c)
-        else:
-            label = t("schedule.course_label", n=c)
         rows.append(
-            [InlineKeyboardButton(text=label, callback_data=f"sch:c:{c}")]
+            [KeyboardButton(schedule_course_row_label(c, cohort_mode=cohort_mode))]
         )
     rows.append(
         [
-            InlineKeyboardButton(text=t("common.back"), callback_data="menu:main"),
-            InlineKeyboardButton(
-                text=t("schedule.to_main_menu"), callback_data="menu:main"
-            ),
+            KeyboardButton(t("common.back")),
+            KeyboardButton(t("schedule.to_main_menu")),
         ]
     )
-    return InlineKeyboardMarkup(rows)
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
-def schedule_groups_keyboard(
-    groups: list[str], *, course: int | None = None
-) -> InlineKeyboardMarkup:
-    rows = []
-    row: list[InlineKeyboardButton] = []
+def schedule_groups_reply_keyboard(groups: list[str]) -> ReplyKeyboardMarkup:
+    rows: list[list[KeyboardButton]] = []
+    row: list[KeyboardButton] = []
     for g in groups:
-        row.append(InlineKeyboardButton(text=g, callback_data=f"sch:g:{g}"))
+        row.append(KeyboardButton(g))
         if len(row) >= 2:
             rows.append(row)
             row = []
     if row:
         rows.append(row)
-    back_cb = "sch:back_courses" if course is not None else "menu:main"
     rows.append(
         [
-            InlineKeyboardButton(text=t("common.back"), callback_data=back_cb),
-            InlineKeyboardButton(
-                text=t("schedule.to_main_menu"), callback_data="menu:main"
-            ),
+            KeyboardButton(t("common.back")),
+            KeyboardButton(t("schedule.to_main_menu")),
         ]
     )
-    return InlineKeyboardMarkup(rows)
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
-def schedule_days_keyboard(group: str) -> InlineKeyboardMarkup:
-    rows = []
-    row = []
+def schedule_days_reply_keyboard() -> ReplyKeyboardMarkup:
+    rows: list[list[KeyboardButton]] = []
+    row: list[KeyboardButton] = []
     for d in range(1, 7):
-        label = t(f"days.short{d}")
-        row.append(
-            InlineKeyboardButton(
-                text=label, callback_data=f"sch:d:{group}:{d}"
-            )
-        )
+        row.append(KeyboardButton(t(f"days.short{d}")))
         if len(row) == 3:
             rows.append(row)
             row = []
@@ -139,116 +135,89 @@ def schedule_days_keyboard(group: str) -> InlineKeyboardMarkup:
         rows.append(row)
     rows.append(
         [
-            InlineKeyboardButton(
-                text=t("common.back"), callback_data="sch:back_groups"
-            ),
-            InlineKeyboardButton(
-                text=t("schedule.to_main_menu"), callback_data="menu:main"
-            ),
+            KeyboardButton(t("common.back")),
+            KeyboardButton(t("schedule.to_main_menu")),
         ]
     )
-    return InlineKeyboardMarkup(rows)
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
-def news_list_keyboard(items: list[tuple[int, str]]) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = []
-    for i, (nid, title) in enumerate(items, start=1):
-        short = title if len(title) <= 48 else title[:45] + "…"
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text=f"{i}. {short}",
-                    callback_data=f"news:v:{nid}",
-                )
-            ]
-        )
+def _truncate_button_label(s: str, max_len: int = 48) -> str:
+    s = s.strip()
+    if len(s) <= max_len:
+        return s
+    return s[:45] + "…"
+
+
+def reply_indexed_label(i: int, title: str) -> str:
+    return f"{i}. {_truncate_button_label(title)}"
+
+
+def news_list_reply_keyboard(items: list[tuple[int, str]]) -> ReplyKeyboardMarkup:
+    rows: list[list[KeyboardButton]] = []
+    for i, (_nid, title) in enumerate(items, start=1):
+        rows.append([KeyboardButton(reply_indexed_label(i, title))])
     rows.append(
         [
-            InlineKeyboardButton(text=t("common.back"), callback_data="menu:main"),
-            InlineKeyboardButton(
-                text=t("schedule.to_main_menu"), callback_data="menu:main"
-            ),
+            KeyboardButton(t("common.back")),
+            KeyboardButton(t("schedule.to_main_menu")),
         ]
     )
-    return InlineKeyboardMarkup(rows)
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
-def faq_list_keyboard(items: list[tuple[int, str]]) -> InlineKeyboardMarkup:
-    rows = []
-    for i, (fid, question) in enumerate(items, start=1):
-        short = question if len(question) <= 48 else question[:45] + "…"
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text=f"{i}. {short}", callback_data=f"faq:{fid}"
-                )
-            ]
-        )
+def faq_list_reply_keyboard(items: list[tuple[int, str]]) -> ReplyKeyboardMarkup:
+    rows: list[list[KeyboardButton]] = []
+    for i, (_fid, question) in enumerate(items, start=1):
+        rows.append([KeyboardButton(reply_indexed_label(i, question))])
     rows.append(
         [
-            InlineKeyboardButton(text=t("common.back"), callback_data="menu:main"),
-            InlineKeyboardButton(
-                text=t("schedule.to_main_menu"), callback_data="menu:main"
-            ),
+            KeyboardButton(t("common.back")),
+            KeyboardButton(t("schedule.to_main_menu")),
         ]
     )
-    return InlineKeyboardMarkup(rows)
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
-def subscription_keyboard(subscribed: bool) -> InlineKeyboardMarkup:
+def faq_answer_reply_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton(t("faq.back_to_questions"))],
+            [
+                KeyboardButton(t("common.back")),
+                KeyboardButton(t("schedule.to_main_menu")),
+            ],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def news_detail_reply_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton(t("news.back_to_list"))],
+            [
+                KeyboardButton(t("common.back")),
+                KeyboardButton(t("schedule.to_main_menu")),
+            ],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def subscription_reply_keyboard(subscribed: bool) -> ReplyKeyboardMarkup:
     toggle = (
         t("subscription.unsubscribe")
         if subscribed
         else t("subscription.subscribe")
     )
-    return InlineKeyboardMarkup(
+    return ReplyKeyboardMarkup(
         [
-            [InlineKeyboardButton(text=toggle, callback_data="sub:toggle")],
+            [KeyboardButton(toggle)],
             [
-                InlineKeyboardButton(
-                    text=t("common.back"), callback_data="menu:main"
-                ),
-                InlineKeyboardButton(
-                    text=t("schedule.to_main_menu"), callback_data="menu:main"
-                ),
+                KeyboardButton(t("common.back")),
+                KeyboardButton(t("schedule.to_main_menu")),
             ],
-        ]
-    )
-
-
-def social_keyboard() -> InlineKeyboardMarkup:
-    from config import (
-        SOCIAL_FACEBOOK_URL,
-        SOCIAL_INSTAGRAM_URL,
-        SOCIAL_SITE_URL,
-        SOCIAL_TELEGRAM_URL,
-    )
-
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    text=t("social.instagram"), url=SOCIAL_INSTAGRAM_URL
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text=t("social.telegram_channel"), url=SOCIAL_TELEGRAM_URL
-                )
-            ],
-            [InlineKeyboardButton(text=t("social.website"), url=SOCIAL_SITE_URL)],
-            [
-                InlineKeyboardButton(
-                    text=t("social.facebook"), url=SOCIAL_FACEBOOK_URL
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text=t("common.back"), callback_data="menu:main"
-                ),
-                InlineKeyboardButton(
-                    text=t("schedule.to_main_menu"), callback_data="menu:main"
-                ),
-            ],
-        ]
+        ],
+        resize_keyboard=True,
     )

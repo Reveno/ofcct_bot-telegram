@@ -38,7 +38,9 @@
     "add_block": "➕ Пара {n} ({start}–{end}) — додаткова\n   📖 {subject}\n   👤 {teacher}\n   🚪 {room}{note_suffix}",
     "note_line": "\n   💬 {note}",
     "no_groups": "Розклад ще не завантажено. Зверніться пізніше.",
-    "conversation_start": "Оберіть групу для перегляду розкладу."
+    "conversation_start": "Оберіть групу для перегляду розкладу.",
+    "back_to_weekdays": "◀️ Дні тижня",
+    "use_keyboard": "Оберіть варіант на клавіатурі нижче."
   },
   "days": {
     "1": "Понеділок",
@@ -58,6 +60,7 @@
     "title": "Оберіть питання:",
     "reply_hint": "Натисніть кнопку на клавіатурі нижче ⬇️",
     "reply_back_to_menu": "🏠 Головне меню",
+    "back_to_questions": "◀️ Усі питання",
     "not_found": "Запис не знайдено.",
     "conversation_start": "Розділ «Питання та відповіді»."
   },

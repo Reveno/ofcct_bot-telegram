@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
 from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
@@ -16,12 +16,14 @@ from i18n import t
 from keyboards import (
     main_menu_reply_keyboard,
     main_menu_text_pattern,
-    schedule_courses_keyboard,
-    schedule_days_keyboard,
-    schedule_groups_keyboard,
+    schedule_course_row_label,
+    schedule_courses_reply_keyboard,
+    schedule_days_reply_keyboard,
+    schedule_groups_reply_keyboard,
+    schedule_view_reply_keyboard,
 )
 
-SELECT_COURSE, SELECT_GROUP, SELECT_DAY = range(3)
+SELECT_COURSE, SELECT_GROUP, SELECT_DAY, VIEW_SCHEDULE = range(4)
 
 
 def get_week_start(d: date | None = None) -> str:
@@ -127,19 +129,29 @@ async def build_schedule_message(group: str, day: int) -> str:
     return "\n".join(lines).strip()
 
 
-def _main_only_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    text=t("common.back"), callback_data="menu:main"
-                ),
-                InlineKeyboardButton(
-                    text=t("schedule.to_main_menu"), callback_data="menu:main"
-                ),
-            ]
-        ]
-    )
+def _back_label() -> str:
+    return t("common.back")
+
+
+def _menu_label() -> str:
+    return t("schedule.to_main_menu")
+
+
+async def _end_main_menu(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    context.user_data.pop("sch_group", None)
+    context.user_data.pop("sch_course", None)
+    context.user_data.pop("sch_label_to_course", None)
+    context.user_data.pop("sch_groups_list", None)
+    context.user_data.pop("sch_cohort_mode", None)
+    msg = update.effective_message
+    if msg:
+        await msg.reply_text(
+            t("menu.welcome"),
+            reply_markup=main_menu_reply_keyboard(),
+        )
+    return ConversationHandler.END
 
 
 async def _start_schedule(
@@ -148,184 +160,205 @@ async def _start_schedule(
     q = update.callback_query
     if q:
         await q.answer()
-    elif not update.message:
+
+    context.user_data.pop("sch_group", None)
+    context.user_data.pop("sch_course", None)
+    context.user_data.pop("sch_label_to_course", None)
+    context.user_data.pop("sch_groups_list", None)
+    context.user_data.pop("sch_cohort_mode", None)
+
+    if not update.effective_chat:
         return ConversationHandler.END
+
+    async def send(text: str, reply_markup) -> None:
+        if update.message:
+            await update.message.reply_text(text, reply_markup=reply_markup)
+        elif q and q.message:
+            await q.message.reply_text(text, reply_markup=reply_markup)
 
     ui_courses = await db.get_ui_course_buttons()
     if ui_courses is not None and len(ui_courses) == 0:
-        text = t("schedule.no_groups")
-        if q:
-            await q.edit_message_text(text, reply_markup=_main_only_kb())
-        elif update.message:
-            await update.message.reply_text(text, reply_markup=_main_only_kb())
+        await send(t("schedule.no_groups"), main_menu_reply_keyboard())
         return ConversationHandler.END
 
     if ui_courses is not None:
         cohort_mode = await db.is_cohort_ui_mode()
-        text = (
+        context.user_data["sch_cohort_mode"] = cohort_mode
+        label_to_course = {
+            schedule_course_row_label(c, cohort_mode=cohort_mode): c
+            for c in ui_courses
+        }
+        context.user_data["sch_label_to_course"] = label_to_course
+        title = (
             t("schedule.choose_cohort")
             if cohort_mode
             else t("schedule.choose_course")
         )
-        kb = schedule_courses_keyboard(ui_courses, cohort_mode=cohort_mode)
-        if q:
-            await q.edit_message_text(text, reply_markup=kb)
-        elif update.message:
-            await update.message.reply_text(text, reply_markup=kb)
-        context.user_data.pop("sch_course", None)
-        context.user_data.pop("sch_group", None)
+        await send(
+            title,
+            schedule_courses_reply_keyboard(ui_courses, cohort_mode=cohort_mode),
+        )
         return SELECT_COURSE
 
     groups = await db.get_all_groups()
     if not groups:
-        text = t("schedule.no_groups")
-        if q:
-            await q.edit_message_text(text, reply_markup=_main_only_kb())
-        elif update.message:
-            await update.message.reply_text(text, reply_markup=_main_only_kb())
+        await send(t("schedule.no_groups"), main_menu_reply_keyboard())
         return ConversationHandler.END
 
-    text = t("schedule.choose_group")
-    kb = schedule_groups_keyboard(groups, course=None)
-    if q:
-        await q.edit_message_text(text, reply_markup=kb)
-    elif update.message:
-        await update.message.reply_text(text, reply_markup=kb)
-    context.user_data.pop("sch_course", None)
-    context.user_data.pop("sch_group", None)
-    return SELECT_GROUP
-
-
-async def _pick_course(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    q = update.callback_query
-    await q.answer()
-    try:
-        course = int((q.data or "").split(":")[2])
-    except (ValueError, IndexError):
-        return ConversationHandler.END
-    context.user_data["sch_course"] = course
-    groups = await db.get_groups_for_course_selection(course)
-    if not groups:
-        await q.edit_message_text(
-            t("schedule.no_groups"), reply_markup=_main_only_kb()
-        )
-        return ConversationHandler.END
-    await q.edit_message_text(
+    context.user_data["sch_groups_list"] = list(groups)
+    await send(
         t("schedule.choose_group"),
-        reply_markup=schedule_groups_keyboard(groups, course=course),
+        schedule_groups_reply_keyboard(groups),
     )
     return SELECT_GROUP
 
 
-async def _show_courses_again(
+async def _course_text(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    q = update.callback_query
-    await q.answer()
-    context.user_data.pop("sch_group", None)
-    context.user_data.pop("sch_course", None)
-    ui = await db.get_ui_course_buttons()
-    if ui is None or not ui:
-        await q.edit_message_text(
-            t("schedule.no_groups"), reply_markup=_main_only_kb()
+    if not update.message or not update.message.text:
+        return SELECT_COURSE
+    text = update.message.text.strip()
+    if text == _menu_label():
+        return await _end_main_menu(update, context)
+    if text == _back_label():
+        return await _end_main_menu(update, context)
+
+    label_map = context.user_data.get("sch_label_to_course") or {}
+    course = label_map.get(text)
+    if course is None:
+        await update.message.reply_text(t("schedule.use_keyboard"))
+        return SELECT_COURSE
+
+    context.user_data["sch_course"] = int(course)
+    groups = await db.get_groups_for_course_selection(int(course))
+    if not groups:
+        await update.message.reply_text(
+            t("schedule.no_groups"),
+            reply_markup=main_menu_reply_keyboard(),
         )
         return ConversationHandler.END
-    cohort_mode = await db.is_cohort_ui_mode()
-    text = (
-        t("schedule.choose_cohort")
-        if cohort_mode
-        else t("schedule.choose_course")
+    context.user_data["sch_groups_list"] = list(groups)
+    await update.message.reply_text(
+        t("schedule.choose_group"),
+        reply_markup=schedule_groups_reply_keyboard(groups),
     )
-    await q.edit_message_text(
-        text,
-        reply_markup=schedule_courses_keyboard(ui, cohort_mode=cohort_mode),
-    )
-    return SELECT_COURSE
+    return SELECT_GROUP
 
 
-async def _pick_group(
+async def _group_text(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    q = update.callback_query
-    await q.answer()
-    data = (q.data or "").split(":", 2)
-    group = data[2] if len(data) > 2 else ""
-    context.user_data["sch_group"] = group
-    await q.edit_message_text(
+    if not update.message or not update.message.text:
+        return SELECT_GROUP
+    text = update.message.text.strip()
+    if text == _menu_label():
+        return await _end_main_menu(update, context)
+    if text == _back_label():
+        course = context.user_data.get("sch_course")
+        if course is not None:
+            context.user_data.pop("sch_group", None)
+            ui = await db.get_ui_course_buttons()
+            if ui is None or not ui:
+                await update.message.reply_text(
+                    t("schedule.no_groups"),
+                    reply_markup=main_menu_reply_keyboard(),
+                )
+                return ConversationHandler.END
+            cohort_mode = await db.is_cohort_ui_mode()
+            context.user_data["sch_cohort_mode"] = cohort_mode
+            label_to_course = {
+                schedule_course_row_label(c, cohort_mode=cohort_mode): c
+                for c in ui
+            }
+            context.user_data["sch_label_to_course"] = label_to_course
+            context.user_data.pop("sch_course", None)
+            title = (
+                t("schedule.choose_cohort")
+                if cohort_mode
+                else t("schedule.choose_course")
+            )
+            await update.message.reply_text(
+                title,
+                reply_markup=schedule_courses_reply_keyboard(
+                    ui, cohort_mode=cohort_mode
+                ),
+            )
+            return SELECT_COURSE
+        return await _end_main_menu(update, context)
+
+    groups = context.user_data.get("sch_groups_list") or []
+    if text not in groups:
+        await update.message.reply_text(t("schedule.use_keyboard"))
+        return SELECT_GROUP
+
+    context.user_data["sch_group"] = text
+    await update.message.reply_text(
         t("schedule.choose_day"),
-        reply_markup=schedule_days_keyboard(group),
+        reply_markup=schedule_days_reply_keyboard(),
     )
     return SELECT_DAY
 
 
-async def _back_to_group_list(
+async def _day_text(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    q = update.callback_query
-    await q.answer()
-    course = context.user_data.get("sch_course")
-    if course is not None:
-        groups = await db.get_groups_for_course_selection(int(course))
+    if not update.message or not update.message.text:
+        return SELECT_DAY
+    text = update.message.text.strip()
+    if text == _menu_label():
+        return await _end_main_menu(update, context)
+    if text == _back_label():
+        groups = context.user_data.get("sch_groups_list") or []
         if not groups:
-            await q.edit_message_text(
-                t("schedule.no_groups"), reply_markup=_main_only_kb()
-            )
-            return ConversationHandler.END
-        await q.edit_message_text(
+            return await _end_main_menu(update, context)
+        await update.message.reply_text(
             t("schedule.choose_group"),
-            reply_markup=schedule_groups_keyboard(groups, course=int(course)),
+            reply_markup=schedule_groups_reply_keyboard(groups),
         )
         return SELECT_GROUP
-    groups = await db.get_all_groups()
-    if not groups:
-        await q.edit_message_text(
-            t("schedule.no_groups"), reply_markup=_main_only_kb()
-        )
-        return ConversationHandler.END
-    await q.edit_message_text(
-        t("schedule.choose_group"),
-        reply_markup=schedule_groups_keyboard(groups, course=None),
-    )
-    return SELECT_GROUP
 
+    day = None
+    for d in range(1, 7):
+        if text == t(f"days.short{d}"):
+            day = d
+            break
+    if day is None:
+        await update.message.reply_text(t("schedule.use_keyboard"))
+        return SELECT_DAY
 
-async def _pick_day(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    q = update.callback_query
-    await q.answer()
-    parts = (q.data or "").split(":")
-    group = parts[2] if len(parts) > 2 else ""
-    day = int(parts[3]) if len(parts) > 3 else 1
-    context.user_data["sch_group"] = group
+    group = context.user_data.get("sch_group") or ""
+    if not group:
+        return await _end_main_menu(update, context)
+
     body = await build_schedule_message(group, day)
-    kb = InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    text=t("common.back"),
-                    callback_data=f"sch:bd:{group}",
-                ),
-                InlineKeyboardButton(
-                    text=t("schedule.to_main_menu"),
-                    callback_data="menu:main",
-                ),
-            ]
-        ]
+    await update.message.reply_text(
+        body,
+        reply_markup=schedule_view_reply_keyboard(),
     )
-    await q.edit_message_text(body, reply_markup=kb)
-    return SELECT_DAY
+    return VIEW_SCHEDULE
 
 
-async def _back_days(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    q = update.callback_query
-    await q.answer()
-    parts = (q.data or "").split(":")
-    group = parts[2] if len(parts) > 2 else context.user_data.get("sch_group", "")
-    await q.edit_message_text(
-        t("schedule.choose_day"), reply_markup=schedule_days_keyboard(group)
-    )
-    return SELECT_DAY
+async def _view_schedule_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    if not update.message or not update.message.text:
+        return VIEW_SCHEDULE
+    text = update.message.text.strip()
+    if text == _menu_label():
+        return await _end_main_menu(update, context)
+    if text == t("schedule.back_to_weekdays"):
+        group = context.user_data.get("sch_group") or ""
+        if not group:
+            return await _end_main_menu(update, context)
+        await update.message.reply_text(
+            t("schedule.choose_day"),
+            reply_markup=schedule_days_reply_keyboard(),
+        )
+        return SELECT_DAY
+
+    await update.message.reply_text(t("schedule.use_keyboard"))
+    return VIEW_SCHEDULE
 
 
 async def _cancel_conv(
@@ -338,10 +371,13 @@ async def _cancel_conv(
         )
     context.user_data.pop("sch_group", None)
     context.user_data.pop("sch_course", None)
+    context.user_data.pop("sch_label_to_course", None)
+    context.user_data.pop("sch_groups_list", None)
+    context.user_data.pop("sch_cohort_mode", None)
     return ConversationHandler.END
 
 
-async def _cancel_conv_via_main(
+async def _cancel_conv_via_main_cb(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
     q = update.callback_query
@@ -351,8 +387,15 @@ async def _cancel_conv_via_main(
             await q.edit_message_text(t("menu.welcome"))
         except Exception:
             pass
+        await q.message.reply_text(
+            t("menu.reply_menu_visible"),
+            reply_markup=main_menu_reply_keyboard(),
+        )
     context.user_data.pop("sch_group", None)
     context.user_data.pop("sch_course", None)
+    context.user_data.pop("sch_label_to_course", None)
+    context.user_data.pop("sch_groups_list", None)
+    context.user_data.pop("sch_cohort_mode", None)
     return ConversationHandler.END
 
 
@@ -369,28 +412,29 @@ def register(app) -> None:
         ],
         states={
             SELECT_COURSE: [
-                CallbackQueryHandler(_pick_course, pattern=r"^sch:c:\d+$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, _course_text),
                 CallbackQueryHandler(
-                    _cancel_conv_via_main, pattern=r"^menu:main$"
+                    _cancel_conv_via_main_cb, pattern=r"^menu:main$"
                 ),
             ],
             SELECT_GROUP: [
-                CallbackQueryHandler(_pick_group, pattern=r"^sch:g:.+"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, _group_text),
                 CallbackQueryHandler(
-                    _show_courses_again, pattern=r"^sch:back_courses$"
-                ),
-                CallbackQueryHandler(
-                    _cancel_conv_via_main, pattern=r"^menu:main$"
+                    _cancel_conv_via_main_cb, pattern=r"^menu:main$"
                 ),
             ],
             SELECT_DAY: [
-                CallbackQueryHandler(_pick_day, pattern=r"^sch:d:.+"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, _day_text),
                 CallbackQueryHandler(
-                    _back_to_group_list, pattern=r"^sch:back_groups$"
+                    _cancel_conv_via_main_cb, pattern=r"^menu:main$"
                 ),
-                CallbackQueryHandler(_back_days, pattern=r"^sch:bd:.+"),
+            ],
+            VIEW_SCHEDULE: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, _view_schedule_text
+                ),
                 CallbackQueryHandler(
-                    _cancel_conv_via_main, pattern=r"^menu:main$"
+                    _cancel_conv_via_main_cb, pattern=r"^menu:main$"
                 ),
             ],
         },
