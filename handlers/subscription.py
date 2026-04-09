@@ -23,6 +23,20 @@ async def open_subscription(
     )
 
 
+async def open_subscription_from_message(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    if not update.message or not update.effective_user:
+        return
+    user = update.effective_user
+    row = await db.get_user(user.id)
+    sub = bool(row and row.get("subscribed"))
+    status = t("subscription.status_on") if sub else t("subscription.status_off")
+    await update.message.reply_text(
+        status, reply_markup=subscription_keyboard(sub)
+    )
+
+
 async def toggle_subscription_cb(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:

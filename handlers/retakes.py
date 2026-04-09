@@ -6,17 +6,10 @@ from i18n import t
 from keyboards import back_to_menu_keyboard
 
 
-async def open_retakes(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    q = update.callback_query
-    await q.answer()
+async def _retakes_body_and_kb() -> tuple[str, object]:
     rows = await db.get_all_retakes()
     if not rows:
-        await q.edit_message_text(
-            t("retakes.empty"), reply_markup=back_to_menu_keyboard()
-        )
-        return
+        return t("retakes.empty"), back_to_menu_keyboard()
     parts: list[str] = []
     for r in rows:
         notes = r.get("notes") or t("retakes.notes_empty")
@@ -31,8 +24,25 @@ async def open_retakes(
                 notes=notes,
             )
         )
-    text = "\n\n".join(parts)
-    await q.edit_message_text(text, reply_markup=back_to_menu_keyboard())
+    return "\n\n".join(parts), back_to_menu_keyboard()
+
+
+async def open_retakes(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    q = update.callback_query
+    await q.answer()
+    text, kb = await _retakes_body_and_kb()
+    await q.edit_message_text(text, reply_markup=kb)
+
+
+async def open_retakes_from_message(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    if not update.message:
+        return
+    text, kb = await _retakes_body_and_kb()
+    await update.message.reply_text(text, reply_markup=kb)
 
 
 def register(app) -> None:

@@ -6,13 +6,17 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     ConversationHandler,
+    MessageHandler,
+    filters,
 )
 
 import db
 from config import LESSON_TIMES
 from i18n import t
 from keyboards import (
-    main_menu_keyboard,
+    hide_reply_keyboard,
+    main_menu_reply_keyboard,
+    main_menu_text_pattern,
     schedule_courses_keyboard,
     schedule_days_keyboard,
     schedule_groups_keyboard,
@@ -142,6 +146,13 @@ async def _start_schedule(
     q = update.callback_query
     if q:
         await q.answer()
+        chat_id = q.message.chat_id
+    elif update.message:
+        chat_id = update.message.chat_id
+    else:
+        return ConversationHandler.END
+
+    await hide_reply_keyboard(context, chat_id)
 
     ui_courses = await db.get_ui_course_buttons()
     if ui_courses is not None and len(ui_courses) == 0:
@@ -321,7 +332,8 @@ async def _cancel_conv(
 ) -> int:
     if update.message:
         await update.message.reply_text(
-            t("common.conversation_cancelled"), reply_markup=main_menu_keyboard()
+            t("common.conversation_cancelled"),
+            reply_markup=main_menu_reply_keyboard(),
         )
     context.user_data.pop("sch_group", None)
     context.user_data.pop("sch_course", None)
@@ -332,10 +344,16 @@ async def _cancel_conv_via_main(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
     q = update.callback_query
-    if q:
+    if q and q.message:
         await q.answer()
-        await q.edit_message_text(
-            t("menu.welcome"), reply_markup=main_menu_keyboard()
+        try:
+            await q.edit_message_text(t("menu.welcome"))
+        except Exception:
+            pass
+        await context.bot.send_message(
+            chat_id=q.message.chat_id,
+            text="\u2060",
+            reply_markup=main_menu_reply_keyboard(),
         )
     context.user_data.pop("sch_group", None)
     context.user_data.pop("sch_course", None)
@@ -345,7 +363,13 @@ async def _cancel_conv_via_main(
 def register(app) -> None:
     conv = ConversationHandler(
         entry_points=[
-            CallbackQueryHandler(_start_schedule, pattern=r"^menu:schedule$")
+            CallbackQueryHandler(_start_schedule, pattern=r"^menu:schedule$"),
+            MessageHandler(
+                filters.TEXT
+                & ~filters.COMMAND
+                & filters.Regex(main_menu_text_pattern("menu.schedule")),
+                _start_schedule,
+            ),
         ],
         states={
             SELECT_COURSE: [

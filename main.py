@@ -70,6 +70,7 @@ async def main() -> None:
     retakes.register(student_app)
     news.register(student_app)
     menu.register_main_callback(student_app)
+    menu.register_main_menu_text_routes(student_app)
     messages.register(admin_app, student_app)
     broadcast.register(admin_app, student_app)
     faq_mgmt.register(admin_app)

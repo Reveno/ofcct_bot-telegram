@@ -57,28 +57,36 @@ def _format_news_detail_html(row: dict) -> str:
     return "\n\n".join(parts)
 
 
+async def _news_list_payload() -> tuple[str, object]:
+    rows = await db.get_recent_broadcasts(15)
+    if not rows:
+        return t("news.empty"), back_to_menu_keyboard()
+    items = [(int(r["id"]), _news_title(r)) for r in rows]
+    return t("news.list_title"), news_list_keyboard(items)
+
+
 async def _show_news_list(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
     q = update.callback_query
     await q.answer()
-    rows = await db.get_recent_broadcasts(15)
-    if not rows:
-        await q.edit_message_text(
-            t("news.empty"), reply_markup=back_to_menu_keyboard()
-        )
-        return
-    items = [(int(r["id"]), _news_title(r)) for r in rows]
-    await q.edit_message_text(
-        t("news.list_title"),
-        reply_markup=news_list_keyboard(items),
-    )
+    text, kb = await _news_list_payload()
+    await q.edit_message_text(text, reply_markup=kb)
 
 
 async def open_news(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
     await _show_news_list(update, context)
+
+
+async def open_news_from_message(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    if not update.message:
+        return
+    text, kb = await _news_list_payload()
+    await update.message.reply_text(text, reply_markup=kb)
 
 
 async def view_news_item(

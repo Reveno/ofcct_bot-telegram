@@ -12,7 +12,7 @@ import db
 from admin_keyboards import admin_reply_feedback_keyboard
 from config import ADMIN_CHAT_ID
 from i18n import t
-from keyboards import back_to_menu_keyboard, main_menu_keyboard
+from keyboards import hide_reply_keyboard, main_menu_reply_keyboard, main_menu_text_pattern
 
 WAITING_TEXT = 1
 
@@ -27,10 +27,18 @@ async def start_feedback(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
     q = update.callback_query
-    await q.answer()
-    await q.edit_message_text(
-        t("feedback.prompt"), reply_markup=back_to_menu_keyboard()
-    )
+    msg = update.message
+    if q:
+        await q.answer()
+        chat_id = q.message.chat_id
+        await q.edit_message_text(t("feedback.prompt"))
+    elif msg:
+        chat_id = msg.chat_id
+        await msg.reply_text(t("feedback.prompt"))
+    else:
+        return ConversationHandler.END
+
+    await hide_reply_keyboard(context, chat_id)
     return WAITING_TEXT
 
 
@@ -55,7 +63,8 @@ async def receive_feedback_text(
     fid = await db.insert_feedback(uid, text)
     await db.touch_user_last_feedback(uid)
     await update.message.reply_text(
-        t("feedback.saved"), reply_markup=main_menu_keyboard()
+        t("feedback.saved"),
+        reply_markup=main_menu_reply_keyboard(),
     )
     if admin_app and ADMIN_CHAT_ID:
         body = t(
@@ -80,7 +89,8 @@ async def cancel_fb(
 ) -> int:
     if update.message:
         await update.message.reply_text(
-            t("common.conversation_cancelled"), reply_markup=main_menu_keyboard()
+            t("common.conversation_cancelled"),
+            reply_markup=main_menu_reply_keyboard(),
         )
     return ConversationHandler.END
 
@@ -89,10 +99,16 @@ async def feedback_exit_main(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
     q = update.callback_query
-    if q:
+    if q and q.message:
         await q.answer()
-        await q.edit_message_text(
-            t("menu.welcome"), reply_markup=main_menu_keyboard()
+        try:
+            await q.edit_message_text(t("menu.welcome"))
+        except Exception:
+            pass
+        await context.bot.send_message(
+            chat_id=q.message.chat_id,
+            text="\u2060",
+            reply_markup=main_menu_reply_keyboard(),
         )
     return ConversationHandler.END
 
@@ -101,7 +117,13 @@ def register(app, admin_app) -> None:
     app.bot_data["admin_app"] = admin_app
     conv = ConversationHandler(
         entry_points=[
-            CallbackQueryHandler(start_feedback, pattern=r"^menu:feedback$")
+            CallbackQueryHandler(start_feedback, pattern=r"^menu:feedback$"),
+            MessageHandler(
+                filters.TEXT
+                & ~filters.COMMAND
+                & filters.Regex(main_menu_text_pattern("menu.feedback")),
+                start_feedback,
+            ),
         ],
         states={
             WAITING_TEXT: [

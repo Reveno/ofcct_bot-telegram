@@ -15,5 +15,15 @@ async def open_social(
     )
 
 
+async def open_social_from_message(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    if not update.message:
+        return
+    await update.message.reply_text(
+        t("social.title"), reply_markup=social_keyboard()
+    )
+
+
 def register(app) -> None:
     app.add_handler(CallbackQueryHandler(open_social, pattern=r"^menu:social$"))

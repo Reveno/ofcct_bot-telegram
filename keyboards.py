@@ -1,42 +1,77 @@
+import re
+
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
 )
 
 from i18n import t
 
 _FAQ_BUTTON_EMOJIS = ("✨", "⚡", "💰", "📊", "📋", "🎓", "❓", "📌")
 
+# Ключі i18n для пунктів головного меню (порядок як на reply-клавіатурі)
+MAIN_MENU_I18N_KEYS: tuple[str, ...] = (
+    "menu.schedule",
+    "menu.faq",
+    "menu.feedback",
+    "menu.social",
+    "menu.retakes",
+    "menu.subscription",
+    "menu.news",
+)
 
-def main_menu_keyboard() -> InlineKeyboardMarkup:
-    rows = [
+
+def main_menu_reply_keyboard() -> ReplyKeyboardMarkup:
+    """Головне меню: reply-клавіатура, 2 кнопки в ряд, як у референсі."""
+    rows: list[list[KeyboardButton]] = [
         [
-            InlineKeyboardButton(
-                text=t("menu.schedule"), callback_data="menu:schedule"
-            )
-        ],
-        [InlineKeyboardButton(text=t("menu.faq"), callback_data="menu:faq")],
-        [
-            InlineKeyboardButton(
-                text=t("menu.feedback"), callback_data="menu:feedback"
-            )
-        ],
-        [InlineKeyboardButton(text=t("menu.social"), callback_data="menu:social")],
-        [
-            InlineKeyboardButton(
-                text=t("menu.retakes"), callback_data="menu:retakes"
-            )
+            KeyboardButton(t("menu.schedule")),
+            KeyboardButton(t("menu.faq")),
         ],
         [
-            InlineKeyboardButton(
-                text=t("menu.subscription"), callback_data="menu:subscription"
-            )
+            KeyboardButton(t("menu.feedback")),
+            KeyboardButton(t("menu.social")),
         ],
-        [InlineKeyboardButton(text=t("menu.news"), callback_data="menu:news")],
+        [
+            KeyboardButton(t("menu.retakes")),
+            KeyboardButton(t("menu.subscription")),
+        ],
+        [KeyboardButton(t("menu.news"))],
     ]
-    return InlineKeyboardMarkup(rows)
+    return ReplyKeyboardMarkup(
+        rows,
+        resize_keyboard=True,
+        is_persistent=True,
+    )
+
+
+def main_menu_text_pattern(i18n_key: str) -> re.Pattern[str]:
+    """Точний збіг тексту кнопки головного меню (для MessageHandler)."""
+    return re.compile("^" + re.escape(t(i18n_key)) + "$")
+
+
+def all_main_menu_button_texts() -> frozenset[str]:
+    return frozenset(t(k) for k in MAIN_MENU_I18N_KEYS)
+
+
+async def ensure_main_menu_reply_keyboard(context, chat_id: int) -> None:
+    """Підняти головну reply-клавіатуру (Telegram не оновлює її через edit)."""
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text="\u2060",
+        reply_markup=main_menu_reply_keyboard(),
+    )
+
+
+async def hide_reply_keyboard(context, chat_id: int) -> None:
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text="\u2060",
+        reply_markup=ReplyKeyboardRemove(),
+    )
 
 
 def back_to_menu_keyboard() -> InlineKeyboardMarkup:
