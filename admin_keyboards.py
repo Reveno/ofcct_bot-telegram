@@ -23,7 +23,8 @@ def admin_reply_router_text_regex() -> re.Pattern[str]:
         "admin.faq",
         "admin.schedule",
         "admin.schedule_changes",
-        "admin.retakes",
+        "admin.consultations",
+        "admin.social",
     )
     return re.compile("^(" + "|".join(re.escape(t(k)) for k in keys) + ")$")
 
@@ -43,9 +44,10 @@ def admin_main_reply_keyboard() -> ReplyKeyboardMarkup:
             KeyboardButton(t("admin.schedule_changes")),
         ],
         [
-            KeyboardButton(t("admin.retakes")),
-            KeyboardButton(t("admin.stats")),
+            KeyboardButton(t("admin.consultations")),
+            KeyboardButton(t("admin.social")),
         ],
+        [KeyboardButton(t("admin.stats"))],
     ]
     return ReplyKeyboardMarkup(
         rows,
@@ -90,7 +92,13 @@ def admin_main_keyboard() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
-                    text=t("admin.retakes"), callback_data="adm:retakes"
+                    text=t("admin.consultations"),
+                    callback_data="adm:consultations",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=t("admin.social"), callback_data="adm:social"
                 )
             ],
             [
@@ -244,19 +252,6 @@ def delete_change_keyboard(change_id: int) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     text=t("admin.delete_change_button"),
                     callback_data=f"chdel:{change_id}",
-                )
-            ]
-        ]
-    )
-
-
-def retake_delete_keyboard(retake_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    text=t("admin.delete_change_button"),
-                    callback_data=f"rtdel:{retake_id}",
                 )
             ]
         ]

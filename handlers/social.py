@@ -10,6 +10,7 @@ from telegram.ext import (
     filters,
 )
 
+import db
 from config import (
     SOCIAL_FACEBOOK_URL,
     SOCIAL_INSTAGRAM_URL,
@@ -34,19 +35,29 @@ def _menu_label() -> str:
     return t("schedule.to_main_menu")
 
 
-def _social_message_html() -> str:
-    lines = [
-        html.escape(t("social.title")),
-        "",
-        f'<a href="{html.escape(SOCIAL_INSTAGRAM_URL)}">'
-        f"{html.escape(t('social.instagram'))}</a>",
-        f'<a href="{html.escape(SOCIAL_TELEGRAM_URL)}">'
-        f"{html.escape(t('social.telegram_channel'))}</a>",
-        f'<a href="{html.escape(SOCIAL_SITE_URL)}">'
-        f"{html.escape(t('social.website'))}</a>",
-        f'<a href="{html.escape(SOCIAL_FACEBOOK_URL)}">'
-        f"{html.escape(t('social.facebook'))}</a>",
-    ]
+async def _social_message_html() -> str:
+    lines = [html.escape(t("social.title")), ""]
+    rows = await db.get_all_social_links()
+    if rows:
+        for r in rows:
+            u = (r.get("url") or "").strip()
+            if not u.startswith(("http://", "https://")):
+                u = "https://" + u
+            title = html.escape(str(r.get("title") or "link"))
+            lines.append(f'<a href="{html.escape(u)}">{title}</a>')
+        return "\n".join(lines)
+    lines.extend(
+        [
+            f'<a href="{html.escape(SOCIAL_INSTAGRAM_URL)}">'
+            f"{html.escape(t('social.instagram'))}</a>",
+            f'<a href="{html.escape(SOCIAL_TELEGRAM_URL)}">'
+            f"{html.escape(t('social.telegram_channel'))}</a>",
+            f'<a href="{html.escape(SOCIAL_SITE_URL)}">'
+            f"{html.escape(t('social.website'))}</a>",
+            f'<a href="{html.escape(SOCIAL_FACEBOOK_URL)}">'
+            f"{html.escape(t('social.facebook'))}</a>",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -69,7 +80,7 @@ async def _social_open(
     if q:
         await q.answer()
 
-    body = _social_message_html()
+    body = await _social_message_html()
     if update.message:
         await update.message.reply_text(
             body,

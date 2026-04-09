@@ -96,6 +96,24 @@ CREATE TABLE IF NOT EXISTS faq (
     answer       TEXT NOT NULL,
     order_index  INTEGER DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS social_links (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    title        TEXT NOT NULL,
+    url          TEXT NOT NULL,
+    sort_order   INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS consultation_slots (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    day_of_week  INTEGER NOT NULL,
+    time         TEXT NOT NULL,
+    teacher      TEXT NOT NULL,
+    room         TEXT NOT NULL,
+    subject      TEXT DEFAULT '',
+    notes        TEXT,
+    sort_order   INTEGER DEFAULT 0
+);
 """
 
 _PG_CONNECT_ATTEMPTS = 20
@@ -251,6 +269,30 @@ async def init_db() -> None:
                 await conn.execute(
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_feedback_at TIMESTAMP"
                 )
+                await conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS social_links (
+                        id           SERIAL PRIMARY KEY,
+                        title        TEXT NOT NULL,
+                        url          TEXT NOT NULL,
+                        sort_order   INTEGER DEFAULT 0
+                    )
+                    """
+                )
+                await conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS consultation_slots (
+                        id           SERIAL PRIMARY KEY,
+                        day_of_week  INTEGER NOT NULL,
+                        time         TEXT NOT NULL,
+                        teacher      TEXT NOT NULL,
+                        room         TEXT NOT NULL,
+                        subject      TEXT DEFAULT '',
+                        notes        TEXT,
+                        sort_order   INTEGER DEFAULT 0
+                    )
+                    """
+                )
         else:
             db_path = Path(SQLITE_PATH)
             _sqlite_conn = await aiosqlite.connect(str(db_path))
@@ -261,6 +303,32 @@ async def init_db() -> None:
             await _migrate_sqlite_broadcasts_photo()
             await _migrate_sqlite_broadcasts_meta()
             await _migrate_sqlite_users_last_feedback()
+            await _migrate_sqlite_social_consultation_tables()
+
+
+async def _migrate_sqlite_social_consultation_tables() -> None:
+    assert _sqlite_conn
+    await _sqlite_conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS social_links (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            title        TEXT NOT NULL,
+            url          TEXT NOT NULL,
+            sort_order   INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS consultation_slots (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            day_of_week  INTEGER NOT NULL,
+            time         TEXT NOT NULL,
+            teacher      TEXT NOT NULL,
+            room         TEXT NOT NULL,
+            subject      TEXT DEFAULT '',
+            notes        TEXT,
+            sort_order   INTEGER DEFAULT 0
+        );
+        """
+    )
+    await _sqlite_conn.commit()
 
 
 async def _migrate_sqlite_schedule_course() -> None:
@@ -1075,6 +1143,322 @@ async def delete_retake(retake_id: int) -> None:
     else:
         assert _sqlite_conn
         await _sqlite_conn.execute("DELETE FROM retakes WHERE id = ?", (retake_id,))
+        await _sqlite_conn.commit()
+
+
+# --- social_links ---
+
+
+async def count_social_links() -> int:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            v = await conn.fetchval("SELECT COUNT(*) FROM social_links")
+            return int(v or 0)
+    assert _sqlite_conn
+    async with _sqlite_conn.execute("SELECT COUNT(*) FROM social_links") as cur:
+        row = await cur.fetchone()
+        return int(row[0]) if row else 0
+
+
+async def seed_social_links(rows: list[tuple[str, str]]) -> None:
+    if not rows:
+        return
+    if await count_social_links() > 0:
+        return
+    for i, (title, url) in enumerate(rows):
+        await insert_social_link(title.strip(), url.strip(), i)
+
+
+async def get_all_social_links() -> list[dict[str, Any]]:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            recs = await conn.fetch(
+                "SELECT id, title, url, sort_order FROM social_links "
+                "ORDER BY sort_order, id"
+            )
+            return [_row_to_dict(r) for r in recs]
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        "SELECT id, title, url, sort_order FROM social_links ORDER BY sort_order, id"
+    ) as cur:
+        rows = await cur.fetchall()
+        return [_row_to_dict(r) for r in rows]
+
+
+async def get_social_link_by_id(link_id: int) -> dict[str, Any]:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT id, title, url, sort_order FROM social_links WHERE id = $1",
+                link_id,
+            )
+            return _row_to_dict(row) if row else {}
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        "SELECT id, title, url, sort_order FROM social_links WHERE id = ?",
+        (link_id,),
+    ) as cur:
+        row = await cur.fetchone()
+        return _row_to_dict(row) if row else {}
+
+
+async def get_next_social_order_index() -> int:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            v = await conn.fetchval("SELECT COALESCE(MAX(sort_order), -1) FROM social_links")
+            return int(v) + 1
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) FROM social_links"
+    ) as cur:
+        row = await cur.fetchone()
+        return int(row[0]) + 1 if row else 0
+
+
+async def insert_social_link(title: str, url: str, order_index: int) -> int:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO social_links (title, url, sort_order)
+                VALUES ($1, $2, $3)
+                RETURNING id
+                """,
+                title,
+                url,
+                order_index,
+            )
+            return int(row["id"])
+    assert _sqlite_conn
+    cur = await _sqlite_conn.execute(
+        """
+        INSERT INTO social_links (title, url, sort_order)
+        VALUES (?, ?, ?)
+        RETURNING id
+        """,
+        (title, url, order_index),
+    )
+    row = await cur.fetchone()
+    await _sqlite_conn.commit()
+    return int(row[0])
+
+
+async def update_social_link(link_id: int, *, title: str, url: str) -> None:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE social_links SET title = $2, url = $3 WHERE id = $1",
+                link_id,
+                title,
+                url,
+            )
+    else:
+        assert _sqlite_conn
+        await _sqlite_conn.execute(
+            "UPDATE social_links SET title = ?, url = ? WHERE id = ?",
+            (title, url, link_id),
+        )
+        await _sqlite_conn.commit()
+
+
+async def delete_social_link(link_id: int) -> None:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            await conn.execute("DELETE FROM social_links WHERE id = $1", link_id)
+    else:
+        assert _sqlite_conn
+        await _sqlite_conn.execute("DELETE FROM social_links WHERE id = ?", (link_id,))
+        await _sqlite_conn.commit()
+
+
+# --- consultation_slots (щотижневі консультації) ---
+
+
+async def get_all_consultation_slots() -> list[dict[str, Any]]:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            recs = await conn.fetch(
+                """
+                SELECT id, day_of_week, time, teacher, room, subject, notes, sort_order
+                FROM consultation_slots
+                ORDER BY day_of_week, time, sort_order, id
+                """
+            )
+            return [_row_to_dict(r) for r in recs]
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        """
+        SELECT id, day_of_week, time, teacher, room, subject, notes, sort_order
+        FROM consultation_slots
+        ORDER BY day_of_week, time, sort_order, id
+        """
+    ) as cur:
+        rows = await cur.fetchall()
+        return [_row_to_dict(r) for r in rows]
+
+
+async def get_consultation_slot_by_id(slot_id: int) -> dict[str, Any]:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, day_of_week, time, teacher, room, subject, notes, sort_order
+                FROM consultation_slots WHERE id = $1
+                """,
+                slot_id,
+            )
+            return _row_to_dict(row) if row else {}
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        """
+        SELECT id, day_of_week, time, teacher, room, subject, notes, sort_order
+        FROM consultation_slots WHERE id = ?
+        """,
+        (slot_id,),
+    ) as cur:
+        row = await cur.fetchone()
+        return _row_to_dict(row) if row else {}
+
+
+async def get_next_consultation_order_index() -> int:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            v = await conn.fetchval(
+                "SELECT COALESCE(MAX(sort_order), -1) FROM consultation_slots"
+            )
+            return int(v) + 1
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) FROM consultation_slots"
+    ) as cur:
+        row = await cur.fetchone()
+        return int(row[0]) + 1 if row else 0
+
+
+async def insert_consultation_slot(data: dict[str, Any]) -> int:
+    subj = (data.get("subject") or "").strip()
+    notes = data.get("notes")
+    if notes is not None:
+        notes = str(notes).strip() or None
+    oi = int(data.get("sort_order", 0))
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO consultation_slots
+                    (day_of_week, time, teacher, room, subject, notes, sort_order)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                RETURNING id
+                """,
+                int(data["day_of_week"]),
+                str(data["time"]).strip(),
+                str(data["teacher"]).strip(),
+                str(data["room"]).strip(),
+                subj,
+                notes,
+                oi,
+            )
+            return int(row["id"])
+    assert _sqlite_conn
+    cur = await _sqlite_conn.execute(
+        """
+        INSERT INTO consultation_slots
+            (day_of_week, time, teacher, room, subject, notes, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        RETURNING id
+        """,
+        (
+            int(data["day_of_week"]),
+            str(data["time"]).strip(),
+            str(data["teacher"]).strip(),
+            str(data["room"]).strip(),
+            subj,
+            notes,
+            oi,
+        ),
+    )
+    row = await cur.fetchone()
+    await _sqlite_conn.commit()
+    return int(row[0])
+
+
+async def update_consultation_slot(
+    slot_id: int,
+    *,
+    day_of_week: int,
+    time: str,
+    teacher: str,
+    room: str,
+    subject: str,
+    notes: str | None,
+) -> None:
+    subj = subject.strip()
+    n = notes.strip() if notes else None
+    if n == "":
+        n = None
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE consultation_slots SET
+                    day_of_week = $2, time = $3, teacher = $4, room = $5,
+                    subject = $6, notes = $7
+                WHERE id = $1
+                """,
+                slot_id,
+                day_of_week,
+                time.strip(),
+                teacher.strip(),
+                room.strip(),
+                subj,
+                n,
+            )
+    else:
+        assert _sqlite_conn
+        await _sqlite_conn.execute(
+            """
+            UPDATE consultation_slots SET
+                day_of_week = ?, time = ?, teacher = ?, room = ?,
+                subject = ?, notes = ?
+            WHERE id = ?
+            """,
+            (
+                day_of_week,
+                time.strip(),
+                teacher.strip(),
+                room.strip(),
+                subj,
+                n,
+                slot_id,
+            ),
+        )
+        await _sqlite_conn.commit()
+
+
+async def delete_consultation_slot(slot_id: int) -> None:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM consultation_slots WHERE id = $1", slot_id
+            )
+    else:
+        assert _sqlite_conn
+        await _sqlite_conn.execute(
+            "DELETE FROM consultation_slots WHERE id = ?", (slot_id,)
+        )
         await _sqlite_conn.commit()
 
 

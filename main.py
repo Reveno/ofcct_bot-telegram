@@ -6,15 +6,24 @@ from telegram.ext import ApplicationBuilder
 import db
 from admin_handlers import (
     broadcast,
+    consultations_mgmt,
     faq_mgmt,
     messages,
     news_mgmt,
     reply_menu,
-    retakes_mgmt,
     schedule_mgmt,
+    social_mgmt,
     stats,
 )
-from config import ADMIN_BOT_TOKEN, BOT_TOKEN
+from config import (
+    ADMIN_BOT_TOKEN,
+    BOT_TOKEN,
+    SOCIAL_FACEBOOK_URL,
+    SOCIAL_INSTAGRAM_URL,
+    SOCIAL_SITE_URL,
+    SOCIAL_TELEGRAM_URL,
+)
+from i18n import t
 from handlers import (
     faq,
     feedback,
@@ -55,6 +64,14 @@ async def main() -> None:
     await db.init_db()
     await db.seed_faq()
     await db.migrate_faq_content()
+    await db.seed_social_links(
+        [
+            (t("social.instagram"), SOCIAL_INSTAGRAM_URL),
+            (t("social.telegram_channel"), SOCIAL_TELEGRAM_URL),
+            (t("social.website"), SOCIAL_SITE_URL),
+            (t("social.facebook"), SOCIAL_FACEBOOK_URL),
+        ]
+    )
 
     student_app = ApplicationBuilder().token(BOT_TOKEN).build()
     admin_app = ApplicationBuilder().token(ADMIN_BOT_TOKEN).build()
@@ -76,7 +93,8 @@ async def main() -> None:
     faq_mgmt.register(admin_app)
     news_mgmt.register(admin_app, student_app)
     schedule_mgmt.register(admin_app)
-    retakes_mgmt.register(admin_app)
+    consultations_mgmt.register(admin_app)
+    social_mgmt.register(admin_app)
     stats.register(admin_app)
     reply_menu.register(admin_app)
 

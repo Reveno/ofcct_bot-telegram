@@ -10,7 +10,8 @@ from i18n import t
 from admin_handlers.broadcast import news_manage_from_message
 from admin_handlers.faq_mgmt import faq_menu_from_message
 from admin_handlers.messages import show_messages_cmd
-from admin_handlers.retakes_mgmt import retakes_menu_from_message
+from admin_handlers.consultations_mgmt import consultations_menu_from_message
+from admin_handlers.social_mgmt import social_menu_from_message
 from admin_handlers.schedule_mgmt import (
     changes_panel_from_message,
     schedule_panel_from_message,
@@ -41,8 +42,10 @@ async def admin_reply_menu_router(
         await schedule_panel_from_message(update, context)
     elif txt == t("admin.schedule_changes"):
         await changes_panel_from_message(update, context)
-    elif txt == t("admin.retakes"):
-        await retakes_menu_from_message(update, context)
+    elif txt == t("admin.consultations"):
+        await consultations_menu_from_message(update, context)
+    elif txt == t("admin.social"):
+        await social_menu_from_message(update, context)
 
 
 def register(app) -> None:

@@ -28,23 +28,43 @@ def _menu_label() -> str:
 
 
 async def _retakes_body() -> str:
-    rows = await db.get_all_retakes()
-    if not rows:
+    slots = await db.get_all_consultation_slots()
+    legacy = await db.get_all_retakes()
+    if not slots and not legacy:
         return t("retakes.empty")
     parts: list[str] = []
-    for r in rows:
-        notes = r.get("notes") or t("retakes.notes_empty")
-        parts.append(
-            t(
-                "retakes.entry",
-                date=r.get("date", ""),
-                time=r.get("time", ""),
-                room=r.get("room", ""),
-                subject=r.get("subject", ""),
-                teacher=r.get("teacher", ""),
-                notes=notes,
+    if slots:
+        parts.append(t("consultations.weekly_header"))
+        for s in slots:
+            dow = int(s["day_of_week"])
+            subj = (s.get("subject") or "").strip() or "—"
+            notes = (s.get("notes") or "").strip() or t("retakes.notes_empty")
+            parts.append(
+                t(
+                    "consultations.weekly_slot",
+                    day=t(f"days.{dow}"),
+                    time=s.get("time", ""),
+                    room=s.get("room", ""),
+                    teacher=s.get("teacher", ""),
+                    subject=subj,
+                    notes=notes,
+                )
             )
-        )
+    if legacy:
+        parts.append(t("consultations.legacy_header"))
+        for r in legacy:
+            notes = r.get("notes") or t("retakes.notes_empty")
+            parts.append(
+                t(
+                    "retakes.entry",
+                    date=r.get("date", ""),
+                    time=r.get("time", ""),
+                    room=r.get("room", ""),
+                    subject=r.get("subject", ""),
+                    teacher=r.get("teacher", ""),
+                    notes=notes,
+                )
+            )
     return "\n\n".join(parts)
 
 
