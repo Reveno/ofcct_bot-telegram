@@ -22,7 +22,7 @@ def _ok(user_id: int | None) -> bool:
     return user_id is not None and user_id in ADMIN_IDS
 
 
-async def _render_faq_panel(q) -> None:
+async def _faq_menu_payload() -> tuple[str, InlineKeyboardMarkup]:
     rows = await db.get_all_faq()
     lines = [t("admin.faq_menu_title")]
     kb_rows: list[list[InlineKeyboardButton]] = [
@@ -54,10 +54,24 @@ async def _render_faq_panel(q) -> None:
             )
         ]
     )
-    await q.edit_message_text(
-        "\n\n".join(lines),
-        reply_markup=InlineKeyboardMarkup(kb_rows),
-    )
+    return "\n\n".join(lines), InlineKeyboardMarkup(kb_rows)
+
+
+async def _render_faq_panel(q) -> None:
+    text, kb = await _faq_menu_payload()
+    await q.edit_message_text(text, reply_markup=kb)
+
+
+async def faq_menu_from_message(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    user = update.effective_user
+    if not update.message or not _ok(user.id if user else None):
+        if update.message and user and user.id not in ADMIN_IDS:
+            await update.message.reply_text(t("admin.access_denied"))
+        return
+    text, kb = await _faq_menu_payload()
+    await update.message.reply_text(text, reply_markup=kb)
 
 
 async def faq_menu_cb(

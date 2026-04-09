@@ -12,7 +12,7 @@ import db
 from admin_keyboards import admin_reply_feedback_keyboard
 from config import ADMIN_CHAT_ID
 from i18n import t
-from keyboards import hide_reply_keyboard, main_menu_reply_keyboard, main_menu_text_pattern
+from keyboards import main_menu_reply_keyboard, main_menu_text_pattern
 
 WAITING_TEXT = 1
 
@@ -30,15 +30,11 @@ async def start_feedback(
     msg = update.message
     if q:
         await q.answer()
-        chat_id = q.message.chat_id
         await q.edit_message_text(t("feedback.prompt"))
     elif msg:
-        chat_id = msg.chat_id
         await msg.reply_text(t("feedback.prompt"))
     else:
         return ConversationHandler.END
-
-    await hide_reply_keyboard(context, chat_id)
     return WAITING_TEXT
 
 
@@ -105,11 +101,6 @@ async def feedback_exit_main(
             await q.edit_message_text(t("menu.welcome"))
         except Exception:
             pass
-        await context.bot.send_message(
-            chat_id=q.message.chat_id,
-            text="\u2060",
-            reply_markup=main_menu_reply_keyboard(),
-        )
     return ConversationHandler.END
 
 

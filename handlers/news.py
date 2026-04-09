@@ -118,7 +118,10 @@ async def view_news_item(
             [
                 InlineKeyboardButton(
                     text=t("common.back"), callback_data="menu:main"
-                )
+                ),
+                InlineKeyboardButton(
+                    text=t("schedule.to_main_menu"), callback_data="menu:main"
+                ),
             ],
         ]
     )

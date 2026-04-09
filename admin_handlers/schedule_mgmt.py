@@ -134,6 +134,46 @@ async def schedule_panel_cb(
     await q.edit_message_text(t("admin.schedule_panel"), reply_markup=kb)
 
 
+async def schedule_panel_from_message(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    if not update.message:
+        return
+    if not _admin_ok(update):
+        await update.message.reply_text(t("admin.access_denied"))
+        return
+    kb = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    text=t("admin.cmd_uploadschedule"),
+                    callback_data="adm:upsched",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=t("admin.cmd_listgroups"),
+                    callback_data="adm:listgroups",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=t("admin.cmd_deleteschedule"),
+                    callback_data="adm:delsched",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=t("common.back"), callback_data="adm:home"
+                )
+            ],
+        ]
+    )
+    await update.message.reply_text(
+        t("admin.schedule_panel"), reply_markup=kb
+    )
+
+
 async def changes_panel_cb(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
@@ -173,6 +213,46 @@ async def changes_panel_cb(
         ]
     )
     await q.edit_message_text(t("admin.changes_panel"), reply_markup=kb)
+
+
+async def changes_panel_from_message(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    if not update.message:
+        return
+    if not _admin_ok(update):
+        await update.message.reply_text(t("admin.access_denied"))
+        return
+    kb = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    text=t("admin.cmd_addchange"),
+                    callback_data="adm:chadd",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=t("admin.cmd_listchanges"),
+                    callback_data="adm:chlist",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=t("admin.cmd_clearchanges"),
+                    callback_data="adm:chclr",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=t("common.back"), callback_data="adm:home"
+                )
+            ],
+        ]
+    )
+    await update.message.reply_text(
+        t("admin.changes_panel"), reply_markup=kb
+    )
 
 
 # --- upload ---

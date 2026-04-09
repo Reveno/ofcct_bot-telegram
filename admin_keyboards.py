@@ -1,6 +1,57 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+import re
+
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
 
 from i18n import t
+
+
+def admin_menu_text_pattern(i18n_key: str) -> re.Pattern[str]:
+    return re.compile("^" + re.escape(t(i18n_key)) + "$")
+
+
+def admin_reply_router_text_regex() -> re.Pattern[str]:
+    """Пункти reply-меню, що обробляються окремо від розмови «Розсилка»."""
+    keys = (
+        "admin.messages",
+        "admin.stats",
+        "admin.news_manage",
+        "admin.faq",
+        "admin.schedule",
+        "admin.schedule_changes",
+        "admin.retakes",
+    )
+    return re.compile("^(" + "|".join(re.escape(t(k)) for k in keys) + ")$")
+
+
+def admin_main_reply_keyboard() -> ReplyKeyboardMarkup:
+    rows: list[list[KeyboardButton]] = [
+        [
+            KeyboardButton(t("admin.messages")),
+            KeyboardButton(t("admin.broadcast")),
+        ],
+        [
+            KeyboardButton(t("admin.news_manage")),
+            KeyboardButton(t("admin.faq")),
+        ],
+        [
+            KeyboardButton(t("admin.schedule")),
+            KeyboardButton(t("admin.schedule_changes")),
+        ],
+        [
+            KeyboardButton(t("admin.retakes")),
+            KeyboardButton(t("admin.stats")),
+        ],
+    ]
+    return ReplyKeyboardMarkup(
+        rows,
+        resize_keyboard=True,
+        is_persistent=True,
+    )
 
 
 def admin_main_keyboard() -> InlineKeyboardMarkup:

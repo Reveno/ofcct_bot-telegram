@@ -60,6 +60,34 @@ async def retakes_menu_cb(
 
 
 @admin_only
+async def retakes_menu_from_message(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    if not update.message:
+        return
+    kb = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    text=t("admin.retake_add_btn"), callback_data="adm:rta"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=t("admin.retake_list_btn"), callback_data="adm:rtl"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=t("common.back"), callback_data="adm:home"
+                )
+            ],
+        ]
+    )
+    await update.message.reply_text(t("admin.retakes") + ":", reply_markup=kb)
+
+
+@admin_only
 async def list_retakes_cmd(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:

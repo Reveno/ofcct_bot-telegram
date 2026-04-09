@@ -13,7 +13,11 @@ from telegram.ext import (
 )
 
 import db
-from admin_keyboards import admin_main_keyboard, broadcast_confirm_keyboard
+from admin_keyboards import (
+    admin_main_keyboard,
+    admin_menu_text_pattern,
+    broadcast_confirm_keyboard,
+)
 from config import ADMIN_IDS
 from i18n import t
 
@@ -56,6 +60,23 @@ async def broadcast_go_home(
             q, t("admin.menu_welcome"), reply_markup=admin_main_keyboard()
         )
     return ConversationHandler.END
+
+
+async def broadcast_menu_from_message(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    user = update.effective_user
+    if not update.message:
+        return ConversationHandler.END
+    if not _admin_only(user.id if user else None):
+        await update.message.reply_text(t("admin.access_denied"))
+        return ConversationHandler.END
+    context.user_data["bc_origin_chat_id"] = update.message.chat_id
+    context.user_data["bc_origin_message_id"] = update.message.message_id
+    context.user_data.pop("bc_text", None)
+    context.user_data.pop("bc_photo_file_id", None)
+    await update.message.reply_text(t("admin.broadcast_start"))
+    return WAIT_TEXT
 
 
 async def broadcast_menu_cb(
@@ -390,29 +411,25 @@ def _fmt_news_admin_dt(val) -> str:
     return s
 
 
-async def _render_news_manage_panel(q) -> None:
+async def _news_manage_payload() -> tuple[str, InlineKeyboardMarkup]:
     rows = await db.get_recent_broadcasts(20)
     if not rows:
-        await q.edit_message_text(
-            t("admin.news_empty"),
-            reply_markup=InlineKeyboardMarkup(
+        return t("admin.news_empty"), InlineKeyboardMarkup(
+            [
                 [
-                    [
-                        InlineKeyboardButton(
-                            text=t("admin.news_compose"),
-                            callback_data="adm:news_compose",
-                        )
-                    ],
-                    [
-                        InlineKeyboardButton(
-                            text=t("common.back"),
-                            callback_data="adm:home",
-                        )
-                    ],
-                ]
-            ),
+                    InlineKeyboardButton(
+                        text=t("admin.news_compose"),
+                        callback_data="adm:news_compose",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text=t("common.back"),
+                        callback_data="adm:home",
+                    )
+                ],
+            ]
         )
-        return
     lines = [t("admin.news_manage_title")]
     kb_rows: list[list[InlineKeyboardButton]] = [
         [
@@ -448,10 +465,24 @@ async def _render_news_manage_panel(q) -> None:
             )
         ]
     )
-    await q.edit_message_text(
-        "\n\n".join(lines),
-        reply_markup=InlineKeyboardMarkup(kb_rows),
-    )
+    return "\n\n".join(lines), InlineKeyboardMarkup(kb_rows)
+
+
+async def _render_news_manage_panel(q) -> None:
+    text, kb = await _news_manage_payload()
+    await q.edit_message_text(text, reply_markup=kb)
+
+
+async def news_manage_from_message(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    user = update.effective_user
+    if not update.message or not _admin_only(user.id if user else None):
+        if update.message and user and not _admin_only(user.id if user else None):
+            await update.message.reply_text(t("admin.access_denied"))
+        return
+    text, kb = await _news_manage_payload()
+    await update.message.reply_text(text, reply_markup=kb)
 
 
 async def news_manage_cb(
@@ -496,6 +527,12 @@ def register(app, student_app) -> None:
         entry_points=[
             CommandHandler("broadcast", broadcast_cmd_entry),
             CallbackQueryHandler(broadcast_menu_cb, pattern=r"^adm:broadcast$"),
+            MessageHandler(
+                filters.TEXT
+                & ~filters.COMMAND
+                & filters.Regex(admin_menu_text_pattern("admin.broadcast")),
+                broadcast_menu_from_message,
+            ),
         ],
         states={
             WAIT_TEXT: [

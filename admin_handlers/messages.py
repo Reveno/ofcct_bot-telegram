@@ -11,7 +11,7 @@ from telegram.ext import (
 )
 
 import db
-from admin_keyboards import admin_main_keyboard
+from admin_keyboards import admin_main_keyboard, admin_main_reply_keyboard
 from config import ADMIN_IDS, admin_only
 from i18n import t
 
@@ -41,7 +41,7 @@ def _username_from_row(r: dict) -> str:
 @admin_only
 async def admin_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        t("admin.menu_welcome"), reply_markup=admin_main_keyboard()
+        t("admin.menu_welcome"), reply_markup=admin_main_reply_keyboard()
     )
 
 

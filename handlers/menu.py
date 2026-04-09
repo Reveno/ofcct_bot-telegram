@@ -9,11 +9,7 @@ from telegram.ext import (
 
 import db
 from i18n import t
-from keyboards import (
-    ensure_main_menu_reply_keyboard,
-    main_menu_reply_keyboard,
-    main_menu_text_pattern,
-)
+from keyboards import main_menu_reply_keyboard, main_menu_text_pattern
 
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -38,7 +34,6 @@ async def main_menu_callback(
         await q.edit_message_text(t("menu.welcome"))
     except Exception:
         pass
-    await ensure_main_menu_reply_keyboard(context, q.message.chat_id)
 
 
 def register(app) -> None:

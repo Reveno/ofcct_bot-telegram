@@ -9,6 +9,7 @@ from admin_handlers import (
     faq_mgmt,
     messages,
     news_mgmt,
+    reply_menu,
     retakes_mgmt,
     schedule_mgmt,
     stats,
@@ -78,6 +79,7 @@ async def main() -> None:
     schedule_mgmt.register(admin_app)
     retakes_mgmt.register(admin_app)
     stats.register(admin_app)
+    reply_menu.register(admin_app)
 
     await student_app.initialize()
     await admin_app.initialize()
