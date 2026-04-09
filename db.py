@@ -1402,6 +1402,7 @@ async def migrate_faq_content() -> None:
     new_contact_q = mig.get("contact_new_question")
     new_contact_a = mig.get("contact_new_answer")
     add_entries = mig.get("add_if_missing") or []
+    sync_answers = mig.get("sync_answers") or []
 
     if USE_POSTGRES:
         assert _pg_pool
@@ -1439,6 +1440,18 @@ async def migrate_faq_content() -> None:
                         an,
                         oi,
                     )
+            for entry in sync_answers:
+                if not isinstance(entry, dict):
+                    continue
+                qn = (entry.get("question") or "").strip()
+                an = (entry.get("answer") or "").strip()
+                if not qn or not an:
+                    continue
+                await conn.execute(
+                    "UPDATE faq SET answer = $2 WHERE question = $1",
+                    qn,
+                    an,
+                )
         return
 
     assert _sqlite_conn
@@ -1472,6 +1485,17 @@ async def migrate_faq_content() -> None:
                 """,
                 (qn, an, oi),
             )
+    for entry in sync_answers:
+        if not isinstance(entry, dict):
+            continue
+        qn = (entry.get("question") or "").strip()
+        an = (entry.get("answer") or "").strip()
+        if not qn or not an:
+            continue
+        await _sqlite_conn.execute(
+            "UPDATE faq SET answer = ? WHERE question = ?",
+            (an, qn),
+        )
     await _sqlite_conn.commit()
 
 
