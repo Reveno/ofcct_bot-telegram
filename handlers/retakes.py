@@ -39,9 +39,11 @@ async def _retakes_body() -> str:
             dow = int(s["day_of_week"])
             subj = (s.get("subject") or "").strip() or "—"
             notes = (s.get("notes") or "").strip() or t("retakes.notes_empty")
+            commission = (s.get("commission") or "").strip() or "—"
             parts.append(
                 t(
                     "consultations.weekly_slot",
+                    commission=commission,
                     day=t(f"days.{dow}"),
                     time=s.get("time", ""),
                     room=s.get("room", ""),

@@ -14,6 +14,35 @@ def admin_menu_text_pattern(i18n_key: str) -> re.Pattern[str]:
     return re.compile("^" + re.escape(t(i18n_key)) + "$")
 
 
+def consultations_submenu_reply_keyboard() -> ReplyKeyboardMarkup:
+    """Лише reply-кнопки розділу консультацій (без inline)."""
+    return ReplyKeyboardMarkup(
+        [
+            [
+                KeyboardButton(t("admin.cons_add_btn")),
+                KeyboardButton(t("admin.cons_list_btn")),
+            ],
+            [
+                KeyboardButton(t("admin.cons_template_btn")),
+                KeyboardButton(t("admin.cons_import_btn")),
+            ],
+            [KeyboardButton(t("admin.cons_back_btn"))],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
+
+
+def consultations_submenu_actions_text_regex() -> re.Pattern[str]:
+    """Тексти кнопок шаблон / список / назад (не додавання й імпорт — їх забирає ConversationHandler)."""
+    keys = (
+        "admin.cons_template_btn",
+        "admin.cons_list_btn",
+        "admin.cons_back_btn",
+    )
+    return re.compile("^(" + "|".join(re.escape(t(k)) for k in keys) + ")$")
+
+
 def admin_reply_router_text_regex() -> re.Pattern[str]:
     """Пункти reply-меню, що обробляються окремо від розмови «Розсилка»."""
     keys = (

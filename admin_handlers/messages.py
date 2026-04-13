@@ -76,7 +76,7 @@ async def _send_unanswered_list(
             )
         elif update.message:
             await update.message.reply_text(
-                text, reply_markup=admin_main_keyboard()
+                text, reply_markup=admin_main_reply_keyboard()
             )
         return
 
@@ -138,11 +138,13 @@ async def adm_home(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await context.bot.send_message(
             chat_id=q.message.chat_id,
             text=t("admin.menu_welcome"),
-            reply_markup=admin_main_keyboard(),
+            reply_markup=admin_main_reply_keyboard(),
         )
         return
-    await q.edit_message_text(
-        t("admin.menu_welcome"), reply_markup=admin_main_keyboard()
+    await q.edit_message_text(t("admin.menu_welcome"))
+    await q.message.reply_text(
+        t("admin.reply_menu_visible"),
+        reply_markup=admin_main_reply_keyboard(),
     )
 
 
@@ -193,7 +195,7 @@ async def submit_reply(
         return ConversationHandler.END
     await db.mark_feedback_answered(int(fid))
     await update.message.reply_text(
-        t("admin.reply_sent"), reply_markup=admin_main_keyboard()
+        t("admin.reply_sent"), reply_markup=admin_main_reply_keyboard()
     )
     context.user_data.pop("reply_fid", None)
     return ConversationHandler.END
@@ -208,7 +210,8 @@ async def cancel_reply(
     context.user_data.pop("reply_fid", None)
     if update.message:
         await update.message.reply_text(
-            t("admin.conversation_cancelled"), reply_markup=admin_main_keyboard()
+            t("admin.conversation_cancelled"),
+            reply_markup=admin_main_reply_keyboard(),
         )
     return ConversationHandler.END
 

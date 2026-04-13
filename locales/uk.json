@@ -95,9 +95,9 @@
   "consultations": {
     "notes_empty": "—",
     "weekly_header": "Щотижневі консультації (години прийому):",
-    "weekly_slot": "📅 Щотижня: {day} · ⏰ {time} · 🚪 {room}\n👤 {teacher}\n📖 {subject}\n📝 {notes}",
+    "weekly_slot": "🏷 ЦК: {commission}\n📅 Щотижня: {day} · ⏰ {time} · 🚪 {room}\n👤 {teacher}\n📖 {subject}\n📝 {notes}",
     "legacy_header": "Разові події (конкретна дата):",
-    "admin_slot_block": "📅 {day} · ⏰ {time} · 🚪 {room}\n👤 {teacher}\n📖 {subject}\n📝 {notes}"
+    "admin_slot_block": "🏷 ЦК: {commission}\n📅 {day} · ⏰ {time} · 🚪 {room}\n👤 {teacher}\n📖 {subject}\n📝 {notes}"
   },
   "news": {
     "empty": "Новин поки немає.",
@@ -203,6 +203,18 @@
     "lesson_label": "{n} пара",
     "cons_add_btn": "➕ Додати слот",
     "cons_list_btn": "📋 Список слотів",
+    "cons_template_btn": "📥 Шаблон Excel (.xlsx)",
+    "cons_import_btn": "📤 Імпорт консультацій",
+    "cons_template_caption": "Шаблон для масового заповнення. Після збереження — «Імпорт консультацій». Деталі на аркуші «Інструкція».",
+    "cons_import_prompt": "Надішліть один файл:\n• .xlsx — за колонками як у шаблоні (ЦК | Викладач | День | Час | Кабінет | Предмет | Примітки);\n• .docx — табличний графік консультацій (як у стандартному Word-документі коледжу), усе завантажується одним файлом.",
+    "cons_import_wrong_ext": "Потрібен файл .xlsx або .docx.",
+    "cons_import_no_rows": "Не знайдено валідних рядків для імпорту.",
+    "cons_import_found": "Знайдено {count} консультацій. Імпортувати?",
+    "cons_import_done": "✅ Імпорт завершено. Додано записів: {inserted}.",
+    "consultations_panel_hint": "Консультації: додавання по одному, імпорт з Excel або одного Word (.docx) — кнопки внизу.",
+    "cons_back_btn": "⬅️ До адмін-панелі",
+    "cons_reply_menu_note": "Нижче — кнопки цього розділу.",
+    "cons_import_expect_file": "Очікую файл .xlsx або .docx. Надішліть документ або /cancel.",
     "cons_pick_day": "Оберіть день тижня (консультації повторюються щотижня):",
     "cons_time": "Час початку (наприклад, 14:00):",
     "cons_teacher": "ПІБ викладача:",

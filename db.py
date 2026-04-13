@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS social_links (
 
 CREATE TABLE IF NOT EXISTS consultation_slots (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    commission   TEXT DEFAULT '',
     day_of_week  INTEGER NOT NULL,
     time         TEXT NOT NULL,
     teacher      TEXT NOT NULL,
@@ -283,6 +284,7 @@ async def init_db() -> None:
                     """
                     CREATE TABLE IF NOT EXISTS consultation_slots (
                         id           SERIAL PRIMARY KEY,
+                        commission   TEXT DEFAULT '',
                         day_of_week  INTEGER NOT NULL,
                         time         TEXT NOT NULL,
                         teacher      TEXT NOT NULL,
@@ -292,6 +294,9 @@ async def init_db() -> None:
                         sort_order   INTEGER DEFAULT 0
                     )
                     """
+                )
+                await conn.execute(
+                    "ALTER TABLE consultation_slots ADD COLUMN IF NOT EXISTS commission TEXT DEFAULT ''"
                 )
         else:
             db_path = Path(SQLITE_PATH)
@@ -304,6 +309,7 @@ async def init_db() -> None:
             await _migrate_sqlite_broadcasts_meta()
             await _migrate_sqlite_users_last_feedback()
             await _migrate_sqlite_social_consultation_tables()
+            await _migrate_sqlite_consultation_commission()
 
 
 async def _migrate_sqlite_social_consultation_tables() -> None:
@@ -318,6 +324,7 @@ async def _migrate_sqlite_social_consultation_tables() -> None:
         );
         CREATE TABLE IF NOT EXISTS consultation_slots (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            commission   TEXT DEFAULT '',
             day_of_week  INTEGER NOT NULL,
             time         TEXT NOT NULL,
             teacher      TEXT NOT NULL,
@@ -329,6 +336,18 @@ async def _migrate_sqlite_social_consultation_tables() -> None:
         """
     )
     await _sqlite_conn.commit()
+
+
+async def _migrate_sqlite_consultation_commission() -> None:
+    assert _sqlite_conn
+    try:
+        await _sqlite_conn.execute(
+            "ALTER TABLE consultation_slots ADD COLUMN commission TEXT DEFAULT ''"
+        )
+        await _sqlite_conn.commit()
+    except aiosqlite.OperationalError as e:
+        if "duplicate column" not in str(e).lower():
+            raise
 
 
 async def _migrate_sqlite_schedule_course() -> None:
@@ -1287,18 +1306,18 @@ async def get_all_consultation_slots() -> list[dict[str, Any]]:
         async with _pg_pool.acquire() as conn:
             recs = await conn.fetch(
                 """
-                SELECT id, day_of_week, time, teacher, room, subject, notes, sort_order
+                SELECT id, commission, day_of_week, time, teacher, room, subject, notes, sort_order
                 FROM consultation_slots
-                ORDER BY day_of_week, time, sort_order, id
+                ORDER BY commission, day_of_week, time, sort_order, id
                 """
             )
             return [_row_to_dict(r) for r in recs]
     assert _sqlite_conn
     async with _sqlite_conn.execute(
         """
-        SELECT id, day_of_week, time, teacher, room, subject, notes, sort_order
+        SELECT id, commission, day_of_week, time, teacher, room, subject, notes, sort_order
         FROM consultation_slots
-        ORDER BY day_of_week, time, sort_order, id
+        ORDER BY commission, day_of_week, time, sort_order, id
         """
     ) as cur:
         rows = await cur.fetchall()
@@ -1311,7 +1330,7 @@ async def get_consultation_slot_by_id(slot_id: int) -> dict[str, Any]:
         async with _pg_pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT id, day_of_week, time, teacher, room, subject, notes, sort_order
+                SELECT id, commission, day_of_week, time, teacher, room, subject, notes, sort_order
                 FROM consultation_slots WHERE id = $1
                 """,
                 slot_id,
@@ -1320,7 +1339,7 @@ async def get_consultation_slot_by_id(slot_id: int) -> dict[str, Any]:
     assert _sqlite_conn
     async with _sqlite_conn.execute(
         """
-        SELECT id, day_of_week, time, teacher, room, subject, notes, sort_order
+        SELECT id, commission, day_of_week, time, teacher, room, subject, notes, sort_order
         FROM consultation_slots WHERE id = ?
         """,
         (slot_id,),
@@ -1346,6 +1365,7 @@ async def get_next_consultation_order_index() -> int:
 
 
 async def insert_consultation_slot(data: dict[str, Any]) -> int:
+    commission = (data.get("commission") or "").strip()
     subj = (data.get("subject") or "").strip()
     notes = data.get("notes")
     if notes is not None:
@@ -1357,10 +1377,11 @@ async def insert_consultation_slot(data: dict[str, Any]) -> int:
             row = await conn.fetchrow(
                 """
                 INSERT INTO consultation_slots
-                    (day_of_week, time, teacher, room, subject, notes, sort_order)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    (commission, day_of_week, time, teacher, room, subject, notes, sort_order)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 RETURNING id
                 """,
+                commission,
                 int(data["day_of_week"]),
                 str(data["time"]).strip(),
                 str(data["teacher"]).strip(),
@@ -1374,11 +1395,12 @@ async def insert_consultation_slot(data: dict[str, Any]) -> int:
     cur = await _sqlite_conn.execute(
         """
         INSERT INTO consultation_slots
-            (day_of_week, time, teacher, room, subject, notes, sort_order)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (commission, day_of_week, time, teacher, room, subject, notes, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id
         """,
         (
+            commission,
             int(data["day_of_week"]),
             str(data["time"]).strip(),
             str(data["teacher"]).strip(),
@@ -1396,6 +1418,7 @@ async def insert_consultation_slot(data: dict[str, Any]) -> int:
 async def update_consultation_slot(
     slot_id: int,
     *,
+    commission: str,
     day_of_week: int,
     time: str,
     teacher: str,
@@ -1413,11 +1436,12 @@ async def update_consultation_slot(
             await conn.execute(
                 """
                 UPDATE consultation_slots SET
-                    day_of_week = $2, time = $3, teacher = $4, room = $5,
-                    subject = $6, notes = $7
+                    commission = $2, day_of_week = $3, time = $4, teacher = $5, room = $6,
+                    subject = $7, notes = $8
                 WHERE id = $1
                 """,
                 slot_id,
+                commission.strip(),
                 day_of_week,
                 time.strip(),
                 teacher.strip(),
@@ -1430,11 +1454,12 @@ async def update_consultation_slot(
         await _sqlite_conn.execute(
             """
             UPDATE consultation_slots SET
-                day_of_week = ?, time = ?, teacher = ?, room = ?,
+                commission = ?, day_of_week = ?, time = ?, teacher = ?, room = ?,
                 subject = ?, notes = ?
             WHERE id = ?
             """,
             (
+                commission.strip(),
                 day_of_week,
                 time.strip(),
                 teacher.strip(),
@@ -1445,6 +1470,60 @@ async def update_consultation_slot(
             ),
         )
         await _sqlite_conn.commit()
+
+
+async def get_distinct_consultation_commissions() -> list[str]:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT DISTINCT commission
+                FROM consultation_slots
+                WHERE commission IS NOT NULL AND TRIM(commission) <> ''
+                ORDER BY commission
+                """
+            )
+            return [str(r["commission"]) for r in rows]
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        """
+        SELECT DISTINCT commission
+        FROM consultation_slots
+        WHERE commission IS NOT NULL AND TRIM(commission) <> ''
+        ORDER BY commission
+        """
+    ) as cur:
+        rows = await cur.fetchall()
+        return [str(r[0]) for r in rows]
+
+
+async def get_teachers_by_consultation_commission(commission: str) -> list[str]:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT DISTINCT teacher
+                FROM consultation_slots
+                WHERE commission = $1 AND teacher IS NOT NULL AND TRIM(teacher) <> ''
+                ORDER BY teacher
+                """,
+                commission,
+            )
+            return [str(r["teacher"]) for r in rows]
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        """
+        SELECT DISTINCT teacher
+        FROM consultation_slots
+        WHERE commission = ? AND teacher IS NOT NULL AND TRIM(teacher) <> ''
+        ORDER BY teacher
+        """,
+        (commission,),
+    ) as cur:
+        rows = await cur.fetchall()
+        return [str(r[0]) for r in rows]
 
 
 async def delete_consultation_slot(slot_id: int) -> None:
