@@ -873,7 +873,7 @@ def register(app) -> None:
     back_tx = filters.Regex("^" + re.escape(t("admin.cons_back_btn")) + "$")
     add_tx = filters.Regex("^" + re.escape(t("admin.cons_add_btn")) + "$")
     imp_tx = filters.Regex("^" + re.escape(t("admin.cons_import_btn")) + "$")
-    extras_rx = consultations_submenu_actions_text_regex()
+    extras_f = filters.Regex(consultations_submenu_actions_text_regex())
     text_no_cmd = filters.TEXT & ~filters.COMMAND
 
     app.add_handler(
@@ -978,7 +978,7 @@ def register(app) -> None:
     app.add_handler(conv)
     app.add_handler(
         MessageHandler(
-            filters.ChatType.PRIVATE & text_no_cmd & extras_rx,
+            filters.ChatType.PRIVATE & text_no_cmd & extras_f,
             consultations_submenu_extras_handler,
         )
     )
