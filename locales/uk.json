@@ -97,7 +97,12 @@
     "weekly_header": "Щотижневі консультації (години прийому):",
     "weekly_slot": "🏷 ЦК: {commission}\n📅 Щотижня: {day} · ⏰ {time} · 🚪 {room}\n👤 {teacher}\n📖 {subject}\n📝 {notes}",
     "legacy_header": "Разові події (конкретна дата):",
-    "admin_slot_block": "🏷 ЦК: {commission}\n📅 {day} · ⏰ {time} · 🚪 {room}\n👤 {teacher}\n📖 {subject}\n📝 {notes}"
+    "admin_slot_block": "🏷 ЦК: {commission}\n📅 {day} · ⏰ {time} · 🚪 {room}\n👤 {teacher}\n📖 {subject}\n📝 {notes}",
+    "student_pick_cc": "Оберіть циклову комісію або перегляньте повний список:",
+    "student_pick_teacher": "ЦК: {commission}\n\nОберіть викладача:",
+    "student_slots_header": "🏷 ЦК: {commission}\n👤 {teacher}\n",
+    "student_show_all": "📋 Усі консультації (списком)",
+    "student_part": "Частина {n} з {total}:"
   },
   "news": {
     "empty": "Новин поки немає.",
@@ -225,6 +230,14 @@
     "cons_saved": "✅ Збережено.",
     "cons_list_empty": "Слотів ще немає. Додайте перший.",
     "cons_list_line": "#{id}\n{block}",
+    "cons_list_pick_commission": "Оберіть циклову комісію (ЦК):",
+    "cons_list_pick_teacher": "ЦК: {commission}\n\nОберіть викладача:",
+    "cons_list_slots_header": "<b>{commission}</b>\n👤 {teacher}\n\nСлоти:",
+    "cons_list_slot_compact": "#{id} · {day} · ⏰ {time} · 🚪 {room}\n📖 {subject} · 📝 {notes}",
+    "cons_list_none_for_teacher": "Для цього викладача слотів немає.",
+    "cons_list_back_cc": "◀️ До вибору ЦК",
+    "cons_list_back_teachers": "◀️ До вибору викладача",
+    "cons_list_cancel": "✖️ Закрити",
     "cons_deleted": "🗑 Запис видалено.",
     "cons_edit_time": "Поточний час: {time}\n\nНовий час або /skip:",
     "cons_edit_teacher": "Поточний викладач: {teacher}\n\nНовий ПІБ або /skip:",

@@ -1,8 +1,10 @@
+import html
 import os
 import re
 import tempfile
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
+from telegram.constants import ParseMode
 from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
@@ -117,9 +119,121 @@ def _slot_block(row: dict) -> str:
     )
 
 
-def _consultation_row_keyboard(sid: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
+def _norm_slot_commission(r: dict) -> str:
+    s = (r.get("commission") or "").strip()
+    return s if s else "—"
+
+
+def _norm_slot_teacher(r: dict) -> str:
+    s = (r.get("teacher") or "").strip()
+    return s if s else "—"
+
+
+def _distinct_sorted_commissions(rows: list[dict]) -> list[str]:
+    return sorted({_norm_slot_commission(r) for r in rows})
+
+
+def _teachers_for_commission_key(rows: list[dict], commission_key: str) -> list[str]:
+    return sorted(
+        {
+            _norm_slot_teacher(r)
+            for r in rows
+            if _norm_slot_commission(r) == commission_key
+        }
+    )
+
+
+def _btn_label(s: str, max_len: int = 58) -> str:
+    s = s.strip() or "—"
+    return s if len(s) <= max_len else s[: max_len - 1] + "…"
+
+
+def _admin_commission_list_keyboard(commissions: list[str]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for i, c in enumerate(commissions):
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=_btn_label(c),
+                    callback_data=f"adm:lc:c:{i}",
+                )
+            ]
+        )
+    rows.append(
         [
+            InlineKeyboardButton(
+                text=t("admin.cons_list_cancel"),
+                callback_data="adm:lc:bx",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+def _admin_teacher_list_keyboard(
+    commission_idx: int, teachers: list[str]
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for ti, name in enumerate(teachers):
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=_btn_label(name),
+                    callback_data=f"adm:lc:t:{commission_idx}:{ti}",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text=t("admin.cons_list_back_cc"),
+                callback_data="adm:lc:bc",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+def _admin_slot_line_compact(r: dict) -> str:
+    subj = html.escape((r.get("subject") or "").strip() or "—")
+    notes_raw = (r.get("notes") or "").strip() or t("consultations.notes_empty")
+    notes = html.escape(notes_raw)
+    return t(
+        "admin.cons_list_slot_compact",
+        id=r["id"],
+        day=html.escape(t(f"days.{int(r['day_of_week'])}")),
+        time=html.escape(str(r.get("time") or "")),
+        room=html.escape(str(r.get("room") or "")),
+        subject=subj,
+        notes=notes,
+    )
+
+
+def _chunk_admin_slots_text(
+    slots: list[dict], header: str, max_len: int = 3800
+) -> list[tuple[list[dict], str]]:
+    chunks: list[tuple[list[dict], str]] = []
+    cur_slots: list[dict] = []
+    cur = header.rstrip() + "\n\n"
+    for s in slots:
+        line = _admin_slot_line_compact(s) + "\n\n"
+        if cur_slots and len(cur) + len(line) > max_len:
+            chunks.append((cur_slots, cur.rstrip()))
+            cur_slots = []
+            cur = header.rstrip() + "\n\n"
+        cur_slots.append(s)
+        cur += line
+    if cur_slots:
+        chunks.append((cur_slots, cur.rstrip()))
+    return chunks
+
+
+def _admin_slots_chunk_keyboard(
+    slot_ids: list[int], commission_idx: int
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for sid in slot_ids:
+        rows.append(
             [
                 InlineKeyboardButton(
                     text="✏️",
@@ -130,8 +244,16 @@ def _consultation_row_keyboard(sid: int) -> InlineKeyboardMarkup:
                     callback_data=f"consdel:{sid}",
                 ),
             ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text=t("admin.cons_list_back_teachers"),
+                callback_data=f"adm:lc:b:{commission_idx}",
+            )
         ]
     )
+    return InlineKeyboardMarkup(rows)
 
 
 @admin_only
@@ -243,8 +365,8 @@ async def _send_consultations_list(
         if edit and query:
             await query.edit_message_text(text)
             await query.message.reply_text(
-                t("admin.reply_menu_visible"),
-                reply_markup=admin_main_reply_keyboard(),
+                t("admin.cons_reply_menu_note"),
+                reply_markup=consultations_submenu_reply_keyboard(),
             )
         elif update.message:
             await update.message.reply_text(
@@ -252,40 +374,188 @@ async def _send_consultations_list(
             )
         return
 
-    def line_for(r: dict) -> str:
-        return t(
-            "admin.cons_list_line",
-            id=r["id"],
-            block=_slot_block(r),
-        )
+    commissions = _distinct_sorted_commissions(rows)
+    kb = _admin_commission_list_keyboard(commissions)
+    title = t("admin.cons_list_pick_commission")
+    if edit and query and query.message:
+        await query.edit_message_text(title, reply_markup=kb)
+    elif update.message:
+        await update.message.reply_text(title, reply_markup=kb)
 
-    if edit and query:
-        r0 = rows[0]
-        await query.edit_message_text(
-            line_for(r0),
-            reply_markup=_consultation_row_keyboard(int(r0["id"])),
+
+async def admin_cons_list_pick_commission_cb(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    q = update.callback_query
+    user = update.effective_user
+    if not q or not user or user.id not in ADMIN_IDS:
+        if q:
+            await q.answer(t("admin.access_denied_short"), show_alert=True)
+        return
+    m = re.match(r"^adm:lc:c:(\d+)$", q.data or "")
+    if not m:
+        await q.answer()
+        return
+    await q.answer()
+    ci = int(m.group(1))
+    rows = await db.get_all_consultation_slots()
+    commissions = _distinct_sorted_commissions(rows)
+    if ci >= len(commissions):
+        return
+    com = commissions[ci]
+    teachers = _teachers_for_commission_key(rows, com)
+    if not teachers:
+        await q.edit_message_text(
+            t("admin.cons_list_none_for_teacher"),
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            text=t("admin.cons_list_back_cc"),
+                            callback_data="adm:lc:bc",
+                        )
+                    ]
+                ]
+            ),
         )
-        cid = query.message.chat_id
-        for r in rows[1:]:
-            await context.bot.send_message(
-                chat_id=cid,
-                text=line_for(r),
-                reply_markup=_consultation_row_keyboard(int(r["id"])),
-            )
+        return
+    await q.edit_message_text(
+        t("admin.cons_list_pick_teacher", commission=com),
+        reply_markup=_admin_teacher_list_keyboard(ci, teachers),
+    )
+
+
+async def admin_cons_list_pick_teacher_cb(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    q = update.callback_query
+    user = update.effective_user
+    if not q or not q.message or not user or user.id not in ADMIN_IDS:
+        if q:
+            await q.answer(t("admin.access_denied_short"), show_alert=True)
+        return
+    m = re.match(r"^adm:lc:t:(\d+):(\d+)$", q.data or "")
+    if not m:
+        await q.answer()
+        return
+    await q.answer()
+    ci, ti = int(m.group(1)), int(m.group(2))
+    rows = await db.get_all_consultation_slots()
+    commissions = _distinct_sorted_commissions(rows)
+    if ci >= len(commissions):
+        return
+    com = commissions[ci]
+    teachers = _teachers_for_commission_key(rows, com)
+    if ti >= len(teachers):
+        return
+    teach = teachers[ti]
+    slots = [
+        r
+        for r in rows
+        if _norm_slot_commission(r) == com and _norm_slot_teacher(r) == teach
+    ]
+    if not slots:
+        await q.edit_message_text(
+            t("admin.cons_list_none_for_teacher"),
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            text=t("admin.cons_list_back_teachers"),
+                            callback_data=f"adm:lc:b:{ci}",
+                        )
+                    ]
+                ]
+            ),
+        )
         return
 
-    if update.message:
-        for i, r in enumerate(rows):
-            markup = _consultation_row_keyboard(int(r["id"]))
-            txt = line_for(r)
-            if i == 0:
-                await update.message.reply_text(txt, reply_markup=markup)
-            else:
-                await context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    text=txt,
-                    reply_markup=markup,
-                )
+    header_html = t(
+        "admin.cons_list_slots_header",
+        commission=html.escape(com),
+        teacher=html.escape(teach),
+    )
+    chunks = _chunk_admin_slots_text(slots, header_html)
+    chat_id = q.message.chat_id
+    first_ids = [int(s["id"]) for s in chunks[0][0]]
+    await q.edit_message_text(
+        chunks[0][1],
+        reply_markup=_admin_slots_chunk_keyboard(first_ids, ci),
+        parse_mode=ParseMode.HTML,
+    )
+    for chunk_slots, chunk_text in chunks[1:]:
+        ids = [int(s["id"]) for s in chunk_slots]
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=chunk_text,
+            reply_markup=_admin_slots_chunk_keyboard(ids, ci),
+            parse_mode=ParseMode.HTML,
+        )
+
+
+async def admin_cons_list_back_commissions_cb(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    q = update.callback_query
+    user = update.effective_user
+    if not q or not user or user.id not in ADMIN_IDS:
+        if q:
+            await q.answer(t("admin.access_denied_short"), show_alert=True)
+        return
+    await q.answer()
+    rows = await db.get_all_consultation_slots()
+    if not rows:
+        await q.edit_message_text(t("admin.cons_list_empty"))
+        return
+    commissions = _distinct_sorted_commissions(rows)
+    await q.edit_message_text(
+        t("admin.cons_list_pick_commission"),
+        reply_markup=_admin_commission_list_keyboard(commissions),
+    )
+
+
+async def admin_cons_list_back_teachers_cb(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    q = update.callback_query
+    user = update.effective_user
+    if not q or not user or user.id not in ADMIN_IDS:
+        if q:
+            await q.answer(t("admin.access_denied_short"), show_alert=True)
+        return
+    m = re.match(r"^adm:lc:b:(\d+)$", q.data or "")
+    if not m:
+        await q.answer()
+        return
+    await q.answer()
+    ci = int(m.group(1))
+    rows = await db.get_all_consultation_slots()
+    commissions = _distinct_sorted_commissions(rows)
+    if ci >= len(commissions):
+        return
+    com = commissions[ci]
+    teachers = _teachers_for_commission_key(rows, com)
+    await q.edit_message_text(
+        t("admin.cons_list_pick_teacher", commission=com),
+        reply_markup=_admin_teacher_list_keyboard(ci, teachers),
+    )
+
+
+async def admin_cons_list_cancel_cb(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    q = update.callback_query
+    user = update.effective_user
+    if not q or not q.message or not user or user.id not in ADMIN_IDS:
+        if q:
+            await q.answer(t("admin.access_denied_short"), show_alert=True)
+        return
+    await q.answer()
+    await q.edit_message_text(t("admin.change_cancelled"))
+    await q.message.reply_text(
+        t("admin.cons_reply_menu_note"),
+        reply_markup=consultations_submenu_reply_keyboard(),
+    )
 
 
 async def delete_consultation_cb(
@@ -990,6 +1260,27 @@ def register(app) -> None:
     )
     app.add_handler(
         CallbackQueryHandler(list_consultations_cb, pattern=r"^adm:cons_list$")
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            admin_cons_list_pick_commission_cb, pattern=r"^adm:lc:c:\d+$"
+        )
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            admin_cons_list_pick_teacher_cb, pattern=r"^adm:lc:t:\d+:\d+$"
+        )
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            admin_cons_list_back_teachers_cb, pattern=r"^adm:lc:b:\d+$"
+        )
+    )
+    app.add_handler(
+        CallbackQueryHandler(admin_cons_list_back_commissions_cb, pattern=r"^adm:lc:bc$")
+    )
+    app.add_handler(
+        CallbackQueryHandler(admin_cons_list_cancel_cb, pattern=r"^adm:lc:bx$")
     )
     app.add_handler(
         CommandHandler("listconsultations", list_consultations_cmd)
