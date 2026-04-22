@@ -120,6 +120,9 @@ async def _faq_list_text(
         reply_markup=faq_answer_reply_keyboard(),
         parse_mode="HTML",
     )
+    file_id = str(row.get("file_id") or "").strip()
+    if file_id:
+        await update.message.reply_document(document=file_id)
     return FAQ_DETAIL
 
 

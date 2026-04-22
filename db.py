@@ -94,7 +94,9 @@ CREATE TABLE IF NOT EXISTS faq (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     question     TEXT NOT NULL,
     answer       TEXT NOT NULL,
-    order_index  INTEGER DEFAULT 0
+    order_index  INTEGER DEFAULT 0,
+    file_id      TEXT,
+    file_name    TEXT
 );
 
 CREATE TABLE IF NOT EXISTS social_links (
@@ -263,9 +265,17 @@ async def init_db() -> None:
                         id           SERIAL PRIMARY KEY,
                         question     TEXT NOT NULL,
                         answer       TEXT NOT NULL,
-                        order_index  INTEGER DEFAULT 0
+                        order_index  INTEGER DEFAULT 0,
+                        file_id      TEXT,
+                        file_name    TEXT
                     )
                     """
+                )
+                await conn.execute(
+                    "ALTER TABLE faq ADD COLUMN IF NOT EXISTS file_id TEXT"
+                )
+                await conn.execute(
+                    "ALTER TABLE faq ADD COLUMN IF NOT EXISTS file_name TEXT"
                 )
                 await conn.execute(
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_feedback_at TIMESTAMP"
@@ -310,6 +320,7 @@ async def init_db() -> None:
             await _migrate_sqlite_users_last_feedback()
             await _migrate_sqlite_social_consultation_tables()
             await _migrate_sqlite_consultation_commission()
+            await _migrate_sqlite_faq_attachments()
 
 
 async def _migrate_sqlite_social_consultation_tables() -> None:
@@ -397,6 +408,17 @@ async def _migrate_sqlite_users_last_feedback() -> None:
     except aiosqlite.OperationalError as e:
         if "duplicate column" not in str(e).lower():
             raise
+
+
+async def _migrate_sqlite_faq_attachments() -> None:
+    assert _sqlite_conn
+    for col in ("file_id", "file_name"):
+        try:
+            await _sqlite_conn.execute(f"ALTER TABLE faq ADD COLUMN {col} TEXT")
+            await _sqlite_conn.commit()
+        except aiosqlite.OperationalError as e:
+            if "duplicate column" not in str(e).lower():
+                raise
 
 
 async def close_db() -> None:
@@ -1797,12 +1819,14 @@ async def get_all_faq() -> list[dict[str, Any]]:
         assert _pg_pool
         async with _pg_pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT id, question, answer, order_index FROM faq ORDER BY order_index, id"
+                "SELECT id, question, answer, order_index, file_id, file_name "
+                "FROM faq ORDER BY order_index, id"
             )
             return [_row_to_dict(r) for r in rows]
     assert _sqlite_conn
     async with _sqlite_conn.execute(
-        "SELECT id, question, answer, order_index FROM faq ORDER BY order_index, id"
+        "SELECT id, question, answer, order_index, file_id, file_name "
+        "FROM faq ORDER BY order_index, id"
     ) as cur:
         rows = await cur.fetchall()
         return [_row_to_dict(r) for r in rows]
@@ -1813,13 +1837,16 @@ async def get_faq_by_id(faq_id: int) -> dict[str, Any] | None:
         assert _pg_pool
         async with _pg_pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT id, question, answer, order_index FROM faq WHERE id = $1",
+                "SELECT id, question, answer, order_index, file_id, file_name "
+                "FROM faq WHERE id = $1",
                 faq_id,
             )
             return _row_to_dict(row) if row else None
     assert _sqlite_conn
     async with _sqlite_conn.execute(
-        "SELECT id, question, answer, order_index FROM faq WHERE id = ?", (faq_id,)
+        "SELECT id, question, answer, order_index, file_id, file_name "
+        "FROM faq WHERE id = ?",
+        (faq_id,),
     ) as cur:
         row = await cur.fetchone()
         return _row_to_dict(row) if row else None
@@ -1962,29 +1989,37 @@ async def migrate_faq_content() -> None:
     await _sqlite_conn.commit()
 
 
-async def insert_faq(question: str, answer: str, order_index: int = 0) -> int:
+async def insert_faq(
+    question: str,
+    answer: str,
+    order_index: int = 0,
+    file_id: str | None = None,
+    file_name: str | None = None,
+) -> int:
     if USE_POSTGRES:
         assert _pg_pool
         async with _pg_pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO faq (question, answer, order_index)
-                VALUES ($1, $2, $3)
+                INSERT INTO faq (question, answer, order_index, file_id, file_name)
+                VALUES ($1, $2, $3, $4, $5)
                 RETURNING id
                 """,
                 question,
                 answer,
                 order_index,
+                file_id,
+                file_name,
             )
             return int(row["id"])
     assert _sqlite_conn
     cur = await _sqlite_conn.execute(
         """
-        INSERT INTO faq (question, answer, order_index)
-        VALUES (?, ?, ?)
+        INSERT INTO faq (question, answer, order_index, file_id, file_name)
+        VALUES (?, ?, ?, ?, ?)
         RETURNING id
         """,
-        (question, answer, order_index),
+        (question, answer, order_index, file_id, file_name),
     )
     row = await cur.fetchone()
     await _sqlite_conn.commit()
@@ -1997,6 +2032,8 @@ async def update_faq(
     question: str | None = None,
     answer: str | None = None,
     order_index: int | None = None,
+    file_id: str | None = None,
+    file_name: str | None = None,
 ) -> None:
     if USE_POSTGRES:
         assert _pg_pool
@@ -2015,6 +2052,16 @@ async def update_faq(
                     order_index,
                     faq_id,
                 )
+            if file_id is not None:
+                await conn.execute(
+                    "UPDATE faq SET file_id = $1 WHERE id = $2", file_id, faq_id
+                )
+            if file_name is not None:
+                await conn.execute(
+                    "UPDATE faq SET file_name = $1 WHERE id = $2",
+                    file_name,
+                    faq_id,
+                )
         return
     assert _sqlite_conn
     if question is not None:
@@ -2028,6 +2075,14 @@ async def update_faq(
     if order_index is not None:
         await _sqlite_conn.execute(
             "UPDATE faq SET order_index = ? WHERE id = ?", (order_index, faq_id)
+        )
+    if file_id is not None:
+        await _sqlite_conn.execute(
+            "UPDATE faq SET file_id = ? WHERE id = ?", (file_id, faq_id)
+        )
+    if file_name is not None:
+        await _sqlite_conn.execute(
+            "UPDATE faq SET file_name = ? WHERE id = ?", (file_name, faq_id)
         )
     await _sqlite_conn.commit()
 
