@@ -1,6 +1,7 @@
 import re
+from io import BytesIO
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
 from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
@@ -12,7 +13,7 @@ from telegram.ext import (
 
 import db
 from admin_keyboards import admin_main_keyboard
-from config import ADMIN_IDS
+from config import ADMIN_IDS, BOT_TOKEN
 from i18n import t
 
 ADD_Q, ADD_A, ADD_FILE, EDIT_Q, EDIT_A, EDIT_FILE = range(6)
@@ -20,6 +21,49 @@ ADD_Q, ADD_A, ADD_FILE, EDIT_Q, EDIT_A, EDIT_FILE = range(6)
 
 def _ok(user_id: int | None) -> bool:
     return user_id is not None and user_id in ADMIN_IDS
+
+
+async def _adapt_document_for_student_bot(
+    document,
+    preferred_chat_id: int | None,
+) -> tuple[str, str | None]:
+    """
+    Повертає file_id, валідний для студентського бота.
+    Якщо адаптація не вдалась, повертає оригінальний file_id адмін-бота.
+    """
+    orig_file_id = document.file_id
+    file_name = document.file_name
+    try:
+        tg_file = await document.get_file()
+        data = await tg_file.download_as_bytearray()
+        student_bot = Bot(BOT_TOKEN)
+        targets: list[int] = []
+        if preferred_chat_id:
+            targets.append(preferred_chat_id)
+        for admin_id in ADMIN_IDS:
+            if admin_id not in targets:
+                targets.append(admin_id)
+        for chat_id in targets:
+            try:
+                sent = await student_bot.send_document(
+                    chat_id=chat_id,
+                    document=InputFile(
+                        BytesIO(data),
+                        filename=file_name or "faq_attachment.bin",
+                    ),
+                    caption="FAQ attachment cache",
+                )
+                try:
+                    await student_bot.delete_message(chat_id=chat_id, message_id=sent.message_id)
+                except Exception:
+                    pass
+                if sent.document and sent.document.file_id:
+                    return sent.document.file_id, (sent.document.file_name or file_name)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return orig_file_id, file_name
 
 
 async def _faq_menu_payload() -> tuple[str, InlineKeyboardMarkup]:
@@ -139,13 +183,17 @@ async def faq_add_receive_a_doc(
     if not q or not a:
         await update.message.reply_text(t("admin.faq_add_answer"))
         return ADD_A
+    student_file_id, student_file_name = await _adapt_document_for_student_bot(
+        update.message.document,
+        update.effective_user.id if update.effective_user else None,
+    )
     oi = await db.get_next_faq_order_index()
     await db.insert_faq(
         q,
         a,
         oi,
-        file_id=update.message.document.file_id,
-        file_name=update.message.document.file_name,
+        file_id=student_file_id,
+        file_name=student_file_name,
     )
     context.user_data.pop("faq_new_q", None)
     context.user_data.pop("faq_new_a", None)
@@ -168,8 +216,10 @@ async def faq_add_receive_file(
     file_id: str | None = None
     file_name: str | None = None
     if update.message.document:
-        file_id = update.message.document.file_id
-        file_name = update.message.document.file_name
+        file_id, file_name = await _adapt_document_for_student_bot(
+            update.message.document,
+            update.effective_user.id if update.effective_user else None,
+        )
     elif update.message.text:
         cmd = update.message.text.strip().lower()
         if cmd == "/skip":
@@ -288,12 +338,16 @@ async def faq_edit_receive_a_doc(
     )
     caption = (update.message.caption or "").strip()
     new_a = caption if caption else row.get("answer")
+    student_file_id, student_file_name = await _adapt_document_for_student_bot(
+        update.message.document,
+        update.effective_user.id if update.effective_user else None,
+    )
     await db.update_faq(
         fid,
         question=str(new_q),
         answer=str(new_a or ""),
-        file_id=update.message.document.file_id,
-        file_name=str(update.message.document.file_name or ""),
+        file_id=student_file_id,
+        file_name=str(student_file_name or ""),
     )
     context.user_data.pop("faq_edit_id", None)
     context.user_data.pop("faq_new_q", None)
@@ -325,8 +379,10 @@ async def faq_edit_receive_file(
     new_file_id = row.get("file_id")
     new_file_name = row.get("file_name")
     if update.message.document:
-        new_file_id = update.message.document.file_id
-        new_file_name = update.message.document.file_name
+        new_file_id, new_file_name = await _adapt_document_for_student_bot(
+            update.message.document,
+            update.effective_user.id if update.effective_user else None,
+        )
     elif update.message.text:
         cmd = update.message.text.strip().lower()
         if cmd == "/skip":

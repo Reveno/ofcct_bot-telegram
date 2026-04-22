@@ -1,6 +1,7 @@
 import html
 
 from telegram import Update
+from telegram.error import BadRequest
 from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
@@ -122,7 +123,10 @@ async def _faq_list_text(
     )
     file_id = str(row.get("file_id") or "").strip()
     if file_id:
-        await update.message.reply_document(document=file_id)
+        try:
+            await update.message.reply_document(document=file_id)
+        except BadRequest:
+            pass
     return FAQ_DETAIL
 
 
