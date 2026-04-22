@@ -271,12 +271,12 @@ async def init_db() -> None:
                     )
                     """
                 )
-                await conn.execute(
-                    "ALTER TABLE faq ADD COLUMN IF NOT EXISTS file_id TEXT"
-                )
-                await conn.execute(
-                    "ALTER TABLE faq ADD COLUMN IF NOT EXISTS file_name TEXT"
-                )
+                for col in ("file_id", "file_name"):
+                    try:
+                        await conn.execute(f"ALTER TABLE faq ADD COLUMN {col} TEXT")
+                    except Exception as e:
+                        if "already exists" not in str(e).lower():
+                            raise
                 await conn.execute(
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_feedback_at TIMESTAMP"
                 )
