@@ -149,7 +149,7 @@ async def _end_main_menu(
     if msg:
         await msg.reply_text(
             t("menu.welcome"),
-            reply_markup=main_menu_reply_keyboard(),
+            reply_markup=await main_menu_reply_keyboard(),
         )
     return ConversationHandler.END
 
@@ -157,6 +157,8 @@ async def _end_main_menu(
 async def _start_schedule(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
+    if not await db.is_menu_section_visible("schedule"):
+        return ConversationHandler.END
     q = update.callback_query
     if q:
         await q.answer()
@@ -178,7 +180,7 @@ async def _start_schedule(
 
     ui_courses = await db.get_ui_course_buttons()
     if ui_courses is not None and len(ui_courses) == 0:
-        await send(t("schedule.no_groups"), main_menu_reply_keyboard())
+        await send(t("schedule.no_groups"), await main_menu_reply_keyboard())
         return ConversationHandler.END
 
     if ui_courses is not None:
@@ -202,7 +204,7 @@ async def _start_schedule(
 
     groups = await db.get_all_groups()
     if not groups:
-        await send(t("schedule.no_groups"), main_menu_reply_keyboard())
+        await send(t("schedule.no_groups"), await main_menu_reply_keyboard())
         return ConversationHandler.END
 
     context.user_data["sch_groups_list"] = list(groups)
@@ -235,7 +237,7 @@ async def _course_text(
     if not groups:
         await update.message.reply_text(
             t("schedule.no_groups"),
-            reply_markup=main_menu_reply_keyboard(),
+            reply_markup=await main_menu_reply_keyboard(),
         )
         return ConversationHandler.END
     context.user_data["sch_groups_list"] = list(groups)
@@ -262,7 +264,7 @@ async def _group_text(
             if ui is None or not ui:
                 await update.message.reply_text(
                     t("schedule.no_groups"),
-                    reply_markup=main_menu_reply_keyboard(),
+                    reply_markup=await main_menu_reply_keyboard(),
                 )
                 return ConversationHandler.END
             cohort_mode = await db.is_cohort_ui_mode()
@@ -367,7 +369,7 @@ async def _cancel_conv(
     if update.message:
         await update.message.reply_text(
             t("common.conversation_cancelled"),
-            reply_markup=main_menu_reply_keyboard(),
+            reply_markup=await main_menu_reply_keyboard(),
         )
     context.user_data.pop("sch_group", None)
     context.user_data.pop("sch_course", None)
@@ -389,7 +391,7 @@ async def _cancel_conv_via_main_cb(
             pass
         await q.message.reply_text(
             t("menu.reply_menu_visible"),
-            reply_markup=main_menu_reply_keyboard(),
+            reply_markup=await main_menu_reply_keyboard(),
         )
     context.user_data.pop("sch_group", None)
     context.user_data.pop("sch_course", None)

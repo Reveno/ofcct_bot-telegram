@@ -2,6 +2,7 @@ import re
 
 from telegram import KeyboardButton, ReplyKeyboardMarkup
 
+import db
 from i18n import t
 
 # Ключі i18n для пунктів головного меню (порядок як на reply-клавіатурі)
@@ -13,26 +14,45 @@ MAIN_MENU_I18N_KEYS: tuple[str, ...] = (
     "menu.retakes",
     "menu.subscription",
     "menu.news",
+    "menu.requisites",
+    "menu.bells",
+    "menu.courses",
+    "menu.edu_process",
+    "menu.admissions",
+)
+
+_MENU_LAYOUT: tuple[tuple[str, str], ...] = (
+    ("schedule", "menu.schedule"),
+    ("faq", "menu.faq"),
+    ("feedback", "menu.feedback"),
+    ("social", "menu.social"),
+    ("retakes", "menu.retakes"),
+    ("subscription", "menu.subscription"),
+    ("news", "menu.news"),
+    ("requisites", "menu.requisites"),
+    ("bells", "menu.bells"),
+    ("courses", "menu.courses"),
+    ("edu_process", "menu.edu_process"),
+    ("admissions", "menu.admissions"),
 )
 
 
-def main_menu_reply_keyboard() -> ReplyKeyboardMarkup:
+async def main_menu_reply_keyboard() -> ReplyKeyboardMarkup:
     """Головне меню: reply-клавіатура, 2 кнопки в ряд, як у референсі."""
-    rows: list[list[KeyboardButton]] = [
-        [
-            KeyboardButton(t("menu.schedule")),
-            KeyboardButton(t("menu.faq")),
-        ],
-        [
-            KeyboardButton(t("menu.feedback")),
-            KeyboardButton(t("menu.social")),
-        ],
-        [
-            KeyboardButton(t("menu.retakes")),
-            KeyboardButton(t("menu.subscription")),
-        ],
-        [KeyboardButton(t("menu.news"))],
-    ]
+    visible = await db.get_menu_visibility_map()
+    rows: list[list[KeyboardButton]] = []
+    cur: list[KeyboardButton] = []
+    for key, i18n_key in _MENU_LAYOUT:
+        if not visible.get(key, True):
+            continue
+        cur.append(KeyboardButton(t(i18n_key)))
+        if len(cur) == 2:
+            rows.append(cur)
+            cur = []
+    if cur:
+        rows.append(cur)
+    if not rows:
+        rows = [[KeyboardButton(t("schedule.to_main_menu"))]]
     return ReplyKeyboardMarkup(
         rows,
         resize_keyboard=True,

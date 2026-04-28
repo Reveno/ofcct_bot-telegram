@@ -117,6 +117,33 @@ CREATE TABLE IF NOT EXISTS consultation_slots (
     notes        TEXT,
     sort_order   INTEGER DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS info_pages (
+    page_key       TEXT PRIMARY KEY,
+    text           TEXT,
+    photo_file_id  TEXT,
+    updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS paid_courses (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    title        TEXT NOT NULL,
+    description  TEXT,
+    order_index  INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS admission_faq (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    question     TEXT NOT NULL,
+    answer       TEXT NOT NULL,
+    date_text    TEXT,
+    order_index  INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS menu_visibility (
+    section_key  TEXT PRIMARY KEY,
+    is_visible   INTEGER DEFAULT 1
+);
 """
 
 _PG_CONNECT_ATTEMPTS = 20
@@ -308,6 +335,54 @@ async def init_db() -> None:
                 await conn.execute(
                     "ALTER TABLE consultation_slots ADD COLUMN IF NOT EXISTS commission TEXT DEFAULT ''"
                 )
+                await conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS info_pages (
+                        page_key       TEXT PRIMARY KEY,
+                        text           TEXT,
+                        photo_file_id  TEXT,
+                        updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+                await conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS paid_courses (
+                        id           SERIAL PRIMARY KEY,
+                        title        TEXT NOT NULL,
+                        description  TEXT,
+                        order_index  INTEGER DEFAULT 0
+                    )
+                    """
+                )
+                await conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS admission_faq (
+                        id           SERIAL PRIMARY KEY,
+                        question     TEXT NOT NULL,
+                        answer       TEXT NOT NULL,
+                        date_text    TEXT,
+                        order_index  INTEGER DEFAULT 0
+                    )
+                    """
+                )
+                await conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS menu_visibility (
+                        section_key  TEXT PRIMARY KEY,
+                        is_visible   INTEGER DEFAULT 1
+                    )
+                    """
+                )
+                for key in _default_menu_sections():
+                    await conn.execute(
+                        """
+                        INSERT INTO menu_visibility (section_key, is_visible)
+                        VALUES ($1, 1)
+                        ON CONFLICT (section_key) DO NOTHING
+                        """,
+                        key,
+                    )
         else:
             db_path = Path(SQLITE_PATH)
             _sqlite_conn = await aiosqlite.connect(str(db_path))
@@ -321,6 +396,8 @@ async def init_db() -> None:
             await _migrate_sqlite_social_consultation_tables()
             await _migrate_sqlite_consultation_commission()
             await _migrate_sqlite_faq_attachments()
+            await _migrate_sqlite_student_sections_tables()
+            await _seed_sqlite_menu_visibility()
 
 
 async def _migrate_sqlite_social_consultation_tables() -> None:
@@ -419,6 +496,68 @@ async def _migrate_sqlite_faq_attachments() -> None:
         except aiosqlite.OperationalError as e:
             if "duplicate column" not in str(e).lower():
                 raise
+
+
+def _default_menu_sections() -> tuple[str, ...]:
+    return (
+        "schedule",
+        "faq",
+        "feedback",
+        "social",
+        "retakes",
+        "subscription",
+        "news",
+        "requisites",
+        "bells",
+        "courses",
+        "edu_process",
+        "admissions",
+    )
+
+
+async def _migrate_sqlite_student_sections_tables() -> None:
+    assert _sqlite_conn
+    await _sqlite_conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS info_pages (
+            page_key       TEXT PRIMARY KEY,
+            text           TEXT,
+            photo_file_id  TEXT,
+            updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS paid_courses (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            title        TEXT NOT NULL,
+            description  TEXT,
+            order_index  INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS admission_faq (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            question     TEXT NOT NULL,
+            answer       TEXT NOT NULL,
+            date_text    TEXT,
+            order_index  INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS menu_visibility (
+            section_key  TEXT PRIMARY KEY,
+            is_visible   INTEGER DEFAULT 1
+        );
+        """
+    )
+    await _sqlite_conn.commit()
+
+
+async def _seed_sqlite_menu_visibility() -> None:
+    assert _sqlite_conn
+    for key in _default_menu_sections():
+        await _sqlite_conn.execute(
+            """
+            INSERT OR IGNORE INTO menu_visibility (section_key, is_visible)
+            VALUES (?, 1)
+            """,
+            (key,),
+        )
+    await _sqlite_conn.commit()
 
 
 async def close_db() -> None:
@@ -2113,6 +2252,377 @@ async def get_next_faq_order_index() -> int:
     ) as cur:
         row = await cur.fetchone()
         return int(row[0] if row else -1) + 1
+
+
+# --- student section visibility ---
+
+
+async def get_menu_visibility_map() -> dict[str, bool]:
+    out = {k: True for k in _default_menu_sections()}
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT section_key, is_visible FROM menu_visibility"
+            )
+            for r in rows:
+                out[str(r["section_key"])] = bool(int(r["is_visible"] or 0))
+            for k in _default_menu_sections():
+                await conn.execute(
+                    """
+                    INSERT INTO menu_visibility (section_key, is_visible)
+                    VALUES ($1, 1)
+                    ON CONFLICT (section_key) DO NOTHING
+                    """,
+                    k,
+                )
+        return out
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        "SELECT section_key, is_visible FROM menu_visibility"
+    ) as cur:
+        rows = await cur.fetchall()
+    for r in rows:
+        out[str(r["section_key"])] = bool(int(r["is_visible"] or 0))
+    for k in _default_menu_sections():
+        await _sqlite_conn.execute(
+            """
+            INSERT OR IGNORE INTO menu_visibility (section_key, is_visible)
+            VALUES (?, 1)
+            """,
+            (k,),
+        )
+    await _sqlite_conn.commit()
+    return out
+
+
+async def is_menu_section_visible(section_key: str) -> bool:
+    vis = await get_menu_visibility_map()
+    return bool(vis.get(section_key, True))
+
+
+async def set_menu_section_visibility(section_key: str, is_visible: bool) -> None:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO menu_visibility (section_key, is_visible)
+                VALUES ($1, $2)
+                ON CONFLICT (section_key)
+                DO UPDATE SET is_visible = EXCLUDED.is_visible
+                """,
+                section_key,
+                1 if is_visible else 0,
+            )
+        return
+    assert _sqlite_conn
+    await _sqlite_conn.execute(
+        """
+        INSERT INTO menu_visibility (section_key, is_visible)
+        VALUES (?, ?)
+        ON CONFLICT(section_key) DO UPDATE SET is_visible = excluded.is_visible
+        """,
+        (section_key, 1 if is_visible else 0),
+    )
+    await _sqlite_conn.commit()
+
+
+# --- info pages ---
+
+
+async def get_info_page(page_key: str) -> dict[str, Any]:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT page_key, text, photo_file_id, updated_at FROM info_pages WHERE page_key = $1",
+                page_key,
+            )
+            return _row_to_dict(row) if row else {}
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        "SELECT page_key, text, photo_file_id, updated_at FROM info_pages WHERE page_key = ?",
+        (page_key,),
+    ) as cur:
+        row = await cur.fetchone()
+        return _row_to_dict(row) if row else {}
+
+
+async def upsert_info_page(
+    page_key: str,
+    *,
+    text: str | None = None,
+    photo_file_id: str | None = None,
+) -> None:
+    cur = await get_info_page(page_key)
+    new_text = text if text is not None else cur.get("text")
+    new_photo = (
+        photo_file_id if photo_file_id is not None else cur.get("photo_file_id")
+    )
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO info_pages (page_key, text, photo_file_id, updated_at)
+                VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                ON CONFLICT (page_key)
+                DO UPDATE SET text = EXCLUDED.text,
+                              photo_file_id = EXCLUDED.photo_file_id,
+                              updated_at = CURRENT_TIMESTAMP
+                """,
+                page_key,
+                new_text,
+                new_photo,
+            )
+        return
+    assert _sqlite_conn
+    await _sqlite_conn.execute(
+        """
+        INSERT INTO info_pages (page_key, text, photo_file_id, updated_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(page_key) DO UPDATE SET
+            text = excluded.text,
+            photo_file_id = excluded.photo_file_id,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (page_key, new_text, new_photo),
+    )
+    await _sqlite_conn.commit()
+
+
+# --- paid courses ---
+
+
+async def get_all_paid_courses() -> list[dict[str, Any]]:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, title, description, order_index FROM paid_courses ORDER BY order_index, id"
+            )
+            return [_row_to_dict(r) for r in rows]
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        "SELECT id, title, description, order_index FROM paid_courses ORDER BY order_index, id"
+    ) as cur:
+        rows = await cur.fetchall()
+        return [_row_to_dict(r) for r in rows]
+
+
+async def get_next_paid_course_order_index() -> int:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            v = await conn.fetchval(
+                "SELECT COALESCE(MAX(order_index), -1) FROM paid_courses"
+            )
+            return int(v or -1) + 1
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        "SELECT COALESCE(MAX(order_index), -1) FROM paid_courses"
+    ) as cur:
+        row = await cur.fetchone()
+        return int(row[0] if row else -1) + 1
+
+
+async def insert_paid_course(title: str, description: str, order_index: int = 0) -> int:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO paid_courses (title, description, order_index)
+                VALUES ($1, $2, $3)
+                RETURNING id
+                """,
+                title,
+                description,
+                order_index,
+            )
+            return int(row["id"])
+    assert _sqlite_conn
+    cur = await _sqlite_conn.execute(
+        """
+        INSERT INTO paid_courses (title, description, order_index)
+        VALUES (?, ?, ?)
+        RETURNING id
+        """,
+        (title, description, order_index),
+    )
+    row = await cur.fetchone()
+    await _sqlite_conn.commit()
+    return int(row[0])
+
+
+async def delete_paid_course(course_id: int) -> None:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            await conn.execute("DELETE FROM paid_courses WHERE id = $1", course_id)
+        return
+    assert _sqlite_conn
+    await _sqlite_conn.execute("DELETE FROM paid_courses WHERE id = ?", (course_id,))
+    await _sqlite_conn.commit()
+
+
+# --- admission faq ---
+
+
+async def get_all_admission_faq() -> list[dict[str, Any]]:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, question, answer, date_text, order_index
+                FROM admission_faq
+                ORDER BY order_index, id
+                """
+            )
+            return [_row_to_dict(r) for r in rows]
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        """
+        SELECT id, question, answer, date_text, order_index
+        FROM admission_faq
+        ORDER BY order_index, id
+        """
+    ) as cur:
+        rows = await cur.fetchall()
+        return [_row_to_dict(r) for r in rows]
+
+
+async def get_admission_faq_by_id(item_id: int) -> dict[str, Any] | None:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, question, answer, date_text, order_index
+                FROM admission_faq WHERE id = $1
+                """,
+                item_id,
+            )
+            return _row_to_dict(row) if row else None
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        """
+        SELECT id, question, answer, date_text, order_index
+        FROM admission_faq WHERE id = ?
+        """,
+        (item_id,),
+    ) as cur:
+        row = await cur.fetchone()
+        return _row_to_dict(row) if row else None
+
+
+async def get_next_admission_order_index() -> int:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            v = await conn.fetchval(
+                "SELECT COALESCE(MAX(order_index), -1) FROM admission_faq"
+            )
+            return int(v or -1) + 1
+    assert _sqlite_conn
+    async with _sqlite_conn.execute(
+        "SELECT COALESCE(MAX(order_index), -1) FROM admission_faq"
+    ) as cur:
+        row = await cur.fetchone()
+        return int(row[0] if row else -1) + 1
+
+
+async def insert_admission_faq(
+    question: str, answer: str, date_text: str = "", order_index: int = 0
+) -> int:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO admission_faq (question, answer, date_text, order_index)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id
+                """,
+                question,
+                answer,
+                date_text,
+                order_index,
+            )
+            return int(row["id"])
+    assert _sqlite_conn
+    cur = await _sqlite_conn.execute(
+        """
+        INSERT INTO admission_faq (question, answer, date_text, order_index)
+        VALUES (?, ?, ?, ?)
+        RETURNING id
+        """,
+        (question, answer, date_text, order_index),
+    )
+    row = await cur.fetchone()
+    await _sqlite_conn.commit()
+    return int(row[0])
+
+
+async def update_admission_faq(
+    item_id: int,
+    *,
+    question: str | None = None,
+    answer: str | None = None,
+    date_text: str | None = None,
+) -> None:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            if question is not None:
+                await conn.execute(
+                    "UPDATE admission_faq SET question = $1 WHERE id = $2",
+                    question,
+                    item_id,
+                )
+            if answer is not None:
+                await conn.execute(
+                    "UPDATE admission_faq SET answer = $1 WHERE id = $2",
+                    answer,
+                    item_id,
+                )
+            if date_text is not None:
+                await conn.execute(
+                    "UPDATE admission_faq SET date_text = $1 WHERE id = $2",
+                    date_text,
+                    item_id,
+                )
+        return
+    assert _sqlite_conn
+    if question is not None:
+        await _sqlite_conn.execute(
+            "UPDATE admission_faq SET question = ? WHERE id = ?",
+            (question, item_id),
+        )
+    if answer is not None:
+        await _sqlite_conn.execute(
+            "UPDATE admission_faq SET answer = ? WHERE id = ?",
+            (answer, item_id),
+        )
+    if date_text is not None:
+        await _sqlite_conn.execute(
+            "UPDATE admission_faq SET date_text = ? WHERE id = ?",
+            (date_text, item_id),
+        )
+    await _sqlite_conn.commit()
+
+
+async def delete_admission_faq(item_id: int) -> None:
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            await conn.execute("DELETE FROM admission_faq WHERE id = $1", item_id)
+        return
+    assert _sqlite_conn
+    await _sqlite_conn.execute("DELETE FROM admission_faq WHERE id = ?", (item_id,))
+    await _sqlite_conn.commit()
 
 
 def _faq_seed_tuples() -> list[tuple[str, str, int]]:

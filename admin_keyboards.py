@@ -54,6 +54,7 @@ def admin_reply_router_text_regex() -> re.Pattern[str]:
         "admin.schedule_changes",
         "admin.consultations",
         "admin.social",
+        "admin.sections",
     )
     return re.compile("^(" + "|".join(re.escape(t(k)) for k in keys) + ")$")
 
@@ -76,6 +77,7 @@ def admin_main_reply_keyboard() -> ReplyKeyboardMarkup:
             KeyboardButton(t("admin.consultations")),
             KeyboardButton(t("admin.social")),
         ],
+        [KeyboardButton(t("admin.sections"))],
         [KeyboardButton(t("admin.stats"))],
     ]
     return ReplyKeyboardMarkup(
@@ -128,6 +130,11 @@ def admin_main_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(
                     text=t("admin.social"), callback_data="adm:social"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=t("admin.sections"), callback_data="adm:sections"
                 )
             ],
             [

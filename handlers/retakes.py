@@ -190,7 +190,7 @@ async def _retakes_end_main(
     if msg:
         await msg.reply_text(
             t("menu.welcome"),
-            reply_markup=main_menu_reply_keyboard(),
+            reply_markup=await main_menu_reply_keyboard(),
         )
     return ConversationHandler.END
 
@@ -198,6 +198,8 @@ async def _retakes_end_main(
 async def _retakes_open(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
+    if not await db.is_menu_section_visible("retakes"):
+        return ConversationHandler.END
     q = update.callback_query
     if q:
         await q.answer()
@@ -465,7 +467,7 @@ async def _retakes_cancel(
     if update.message:
         await update.message.reply_text(
             t("common.conversation_cancelled"),
-            reply_markup=main_menu_reply_keyboard(),
+            reply_markup=await main_menu_reply_keyboard(),
         )
     return ConversationHandler.END
 
@@ -482,7 +484,7 @@ async def _retakes_main_cb(
             pass
         await q.message.reply_text(
             t("menu.reply_menu_visible"),
-            reply_markup=main_menu_reply_keyboard(),
+            reply_markup=await main_menu_reply_keyboard(),
         )
     return ConversationHandler.END
 

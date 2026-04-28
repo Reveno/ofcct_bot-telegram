@@ -30,6 +30,8 @@ def _user_ref(user) -> str:
 async def start_feedback(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
+    if not await db.is_menu_section_visible("feedback"):
+        return ConversationHandler.END
     q = update.callback_query
     msg = update.message
     if q:
@@ -56,7 +58,7 @@ async def receive_feedback_text(
     if stripped in all_main_menu_button_texts():
         await update.message.reply_text(
             t("menu.welcome"),
-            reply_markup=main_menu_reply_keyboard(),
+            reply_markup=await main_menu_reply_keyboard(),
         )
         return ConversationHandler.END
     uid = update.effective_user.id
@@ -65,14 +67,14 @@ async def receive_feedback_text(
         minutes = max(1, (remain + 59) // 60)
         await update.message.reply_text(
             t("feedback.rate_limited", minutes=minutes),
-            reply_markup=main_menu_reply_keyboard(),
+            reply_markup=await main_menu_reply_keyboard(),
         )
         return WAITING_TEXT
     fid = await db.insert_feedback(uid, text)
     await db.touch_user_last_feedback(uid)
     await update.message.reply_text(
         t("feedback.saved"),
-        reply_markup=main_menu_reply_keyboard(),
+        reply_markup=await main_menu_reply_keyboard(),
     )
     if admin_app and ADMIN_CHAT_ID:
         body = t(
@@ -98,7 +100,7 @@ async def cancel_fb(
     if update.message:
         await update.message.reply_text(
             t("common.conversation_cancelled"),
-            reply_markup=main_menu_reply_keyboard(),
+            reply_markup=await main_menu_reply_keyboard(),
         )
     return ConversationHandler.END
 
@@ -115,7 +117,7 @@ async def feedback_exit_main(
             pass
         await q.message.reply_text(
             t("menu.reply_menu_visible"),
-            reply_markup=main_menu_reply_keyboard(),
+            reply_markup=await main_menu_reply_keyboard(),
         )
     return ConversationHandler.END
 

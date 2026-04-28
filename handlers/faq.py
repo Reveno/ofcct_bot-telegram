@@ -41,7 +41,7 @@ async def _faq_end_main(
     if msg:
         await msg.reply_text(
             t("menu.welcome"),
-            reply_markup=main_menu_reply_keyboard(),
+            reply_markup=await main_menu_reply_keyboard(),
         )
     return ConversationHandler.END
 
@@ -49,6 +49,8 @@ async def _faq_end_main(
 async def _faq_open_list(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
+    if not await db.is_menu_section_visible("faq"):
+        return ConversationHandler.END
     q = update.callback_query
     if q:
         await q.answer()
@@ -62,12 +64,12 @@ async def _faq_open_list(
         if update.message:
             await update.message.reply_text(
                 text,
-                reply_markup=main_menu_reply_keyboard(),
+                reply_markup=await main_menu_reply_keyboard(),
             )
         elif q and q.message:
             await q.message.reply_text(
                 text,
-                reply_markup=main_menu_reply_keyboard(),
+                reply_markup=await main_menu_reply_keyboard(),
             )
         return ConversationHandler.END
 
@@ -109,7 +111,7 @@ async def _faq_list_text(
     if not row:
         await update.message.reply_text(
             t("faq.not_found"),
-            reply_markup=main_menu_reply_keyboard(),
+            reply_markup=await main_menu_reply_keyboard(),
         )
         return ConversationHandler.END
 
@@ -158,7 +160,7 @@ async def _faq_cancel(
     if update.message:
         await update.message.reply_text(
             t("common.conversation_cancelled"),
-            reply_markup=main_menu_reply_keyboard(),
+            reply_markup=await main_menu_reply_keyboard(),
         )
     context.user_data.pop("faq_items", None)
     context.user_data.pop("faq_label_to_id", None)
@@ -177,7 +179,7 @@ async def _faq_main_cb(
             pass
         await q.message.reply_text(
             t("menu.reply_menu_visible"),
-            reply_markup=main_menu_reply_keyboard(),
+            reply_markup=await main_menu_reply_keyboard(),
         )
     context.user_data.pop("faq_items", None)
     context.user_data.pop("faq_label_to_id", None)

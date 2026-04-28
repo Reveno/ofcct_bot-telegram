@@ -17,7 +17,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     un = user.username or ""
     await db.upsert_user(user.id, un)
     await update.message.reply_text(
-        t("menu.welcome"), reply_markup=main_menu_reply_keyboard()
+        t("menu.welcome"), reply_markup=await main_menu_reply_keyboard()
     )
 
 
@@ -34,7 +34,7 @@ async def main_menu_callback(
         pass
     await q.message.reply_text(
         t("menu.reply_menu_visible"),
-        reply_markup=main_menu_reply_keyboard(),
+        reply_markup=await main_menu_reply_keyboard(),
     )
 
 

@@ -5,6 +5,7 @@ from telegram.ext import ApplicationBuilder
 
 import db
 from admin_handlers import (
+    admissions_mgmt,
     broadcast,
     consultations_mgmt,
     faq_mgmt,
@@ -13,6 +14,7 @@ from admin_handlers import (
     reply_menu,
     schedule_mgmt,
     social_mgmt,
+    sections_mgmt,
     stats,
 )
 from config import (
@@ -25,11 +27,16 @@ from config import (
 )
 from i18n import t
 from handlers import (
+    admissions,
+    bells,
+    courses,
+    edu_process,
     faq,
     feedback,
     menu,
     news,
     retakes,
+    requisites,
     schedule,
     social,
     subscription,
@@ -82,6 +89,11 @@ async def main() -> None:
     menu.register(student_app)
     schedule.register(student_app)
     faq.register(student_app)
+    admissions.register(student_app)
+    requisites.register(student_app)
+    bells.register(student_app)
+    courses.register(student_app)
+    edu_process.register(student_app)
     feedback.register(student_app, admin_app)
     subscription.register(student_app)
     social.register(student_app)
@@ -95,6 +107,8 @@ async def main() -> None:
     schedule_mgmt.register(admin_app)
     consultations_mgmt.register(admin_app)
     social_mgmt.register(admin_app)
+    sections_mgmt.register(admin_app)
+    admissions_mgmt.register(admin_app)
     stats.register(admin_app)
     reply_menu.register(admin_app)
 
