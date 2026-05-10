@@ -30,6 +30,21 @@ from utils.schedule_parser import parse_schedule_async
 
 UP_WAIT, UP_CONFIRM = range(2)
 
+
+async def _notify_schedule_subscribers(student_app, affected_groups: set[str]) -> None:
+    if not affected_groups:
+        return
+    try:
+        uids = await db.get_user_ids_for_schedule_notification(affected_groups)
+    except Exception:
+        return
+    text = t("schedule.update_notify")
+    for uid in uids:
+        try:
+            await student_app.bot.send_message(chat_id=uid, text=text)
+        except Exception:
+            pass
+
 # Одне повідомлення: файл .xlsx + підпис /uploadschedule (зручно для груп)
 _UPLOAD_DOC_WITH_CAPTION = filters.Document.ALL & filters.CaptionRegex(
     r"^/uploadschedule(@\w+)?(\s|$)"
@@ -327,7 +342,7 @@ async def upload_receive_doc(
 
 
 async def upload_confirm(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
+    update: Update, context: ContextTypes.DEFAULT_TYPE, student_app
 ) -> int:
     if not _admin_ok(update):
         return ConversationHandler.END
@@ -370,6 +385,9 @@ async def upload_confirm(
             groups_count=len(groups),
         ),
         reply_markup=admin_main_keyboard(),
+    )
+    context.application.create_task(
+        _notify_schedule_subscribers(student_app, set(groups))
     )
     return ConversationHandler.END
 
@@ -605,7 +623,7 @@ async def dls_back_lesson(
 
 
 async def dls_confirm(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
+    update: Update, context: ContextTypes.DEFAULT_TYPE, student_app
 ) -> int:
     if not _admin_ok(update):
         return ConversationHandler.END
@@ -625,6 +643,9 @@ async def dls_confirm(
     await db.delete_schedule_lesson(str(group), int(day), int(lesson))
     await q.edit_message_text(
         t("admin.delete_schedule_done"), reply_markup=admin_main_keyboard()
+    )
+    context.application.create_task(
+        _notify_schedule_subscribers(student_app, {str(group)})
     )
     return ConversationHandler.END
 
@@ -1144,7 +1165,17 @@ async def clearchanges_confirm(
     )
 
 
-def register(app) -> None:
+def register(app, student_app) -> None:
+    async def upload_confirm_wrap(
+        u: Update, c: ContextTypes.DEFAULT_TYPE
+    ) -> int:
+        return await upload_confirm(u, c, student_app)
+
+    async def dls_confirm_wrap(
+        u: Update, c: ContextTypes.DEFAULT_TYPE
+    ) -> int:
+        return await dls_confirm(u, c, student_app)
+
     up_conv = ConversationHandler(
         entry_points=[
             CommandHandler("uploadschedule", upload_entry_cmd),
@@ -1156,7 +1187,7 @@ def register(app) -> None:
                 MessageHandler(filters.Document.ALL, upload_receive_doc),
             ],
             UP_CONFIRM: [
-                CallbackQueryHandler(upload_confirm, pattern=r"^upsched:(yes|no)$")
+                CallbackQueryHandler(upload_confirm_wrap, pattern=r"^upsched:(yes|no)$")
             ],
         },
         fallbacks=[CommandHandler("cancel", upload_cancel)],
@@ -1186,7 +1217,7 @@ def register(app) -> None:
                 CallbackQueryHandler(dls_back_day, pattern=r"^dls:back_d:.+"),
             ],
             DS_CONFIRM: [
-                CallbackQueryHandler(dls_confirm, pattern=r"^dls:cf:(yes|no)$"),
+                CallbackQueryHandler(dls_confirm_wrap, pattern=r"^dls:cf:(yes|no)$"),
             ],
         },
         fallbacks=[CommandHandler("cancel", delsched_cancel)],

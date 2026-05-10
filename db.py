@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS users (
     username    TEXT,
     subscribed  INTEGER DEFAULT 0,
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_feedback_at TIMESTAMP
+    last_feedback_at TIMESTAMP,
+    preferred_group TEXT
 );
 
 CREATE TABLE IF NOT EXISTS schedule (
@@ -308,6 +309,9 @@ async def init_db() -> None:
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_feedback_at TIMESTAMP"
                 )
                 await conn.execute(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_group TEXT"
+                )
+                await conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS social_links (
                         id           SERIAL PRIMARY KEY,
@@ -398,6 +402,7 @@ async def init_db() -> None:
             await _migrate_sqlite_faq_attachments()
             await _migrate_sqlite_student_sections_tables()
             await _seed_sqlite_menu_visibility()
+            await _migrate_sqlite_users_preferred_group()
 
 
 async def _migrate_sqlite_social_consultation_tables() -> None:
@@ -480,6 +485,18 @@ async def _migrate_sqlite_users_last_feedback() -> None:
     try:
         await _sqlite_conn.execute(
             "ALTER TABLE users ADD COLUMN last_feedback_at TIMESTAMP"
+        )
+        await _sqlite_conn.commit()
+    except aiosqlite.OperationalError as e:
+        if "duplicate column" not in str(e).lower():
+            raise
+
+
+async def _migrate_sqlite_users_preferred_group() -> None:
+    assert _sqlite_conn
+    try:
+        await _sqlite_conn.execute(
+            "ALTER TABLE users ADD COLUMN preferred_group TEXT"
         )
         await _sqlite_conn.commit()
     except aiosqlite.OperationalError as e:
@@ -751,17 +768,92 @@ async def get_user(user_id: int) -> dict[str, Any] | None:
         assert _pg_pool
         async with _pg_pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT user_id, username, subscribed, created_at FROM users WHERE user_id = $1",
+                """
+                SELECT user_id, username, subscribed, created_at, preferred_group
+                FROM users WHERE user_id = $1
+                """,
                 user_id,
             )
             return _row_to_dict(row) if row else None
     assert _sqlite_conn
     async with _sqlite_conn.execute(
-        "SELECT user_id, username, subscribed, created_at FROM users WHERE user_id = ?",
+        """
+        SELECT user_id, username, subscribed, created_at, preferred_group
+        FROM users WHERE user_id = ?
+        """,
         (user_id,),
     ) as cur:
         row = await cur.fetchone()
         return _row_to_dict(row) if row else None
+
+
+async def set_user_preferred_group(
+    user_id: int, group_name: str | None
+) -> None:
+    val = None if group_name is None else str(group_name).strip() or None
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO users (user_id, preferred_group)
+                VALUES ($1, $2)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    preferred_group = EXCLUDED.preferred_group
+                """,
+                user_id,
+                val,
+            )
+        return
+    assert _sqlite_conn
+    await _sqlite_conn.execute(
+        """
+        INSERT INTO users (user_id, preferred_group)
+        VALUES (?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            preferred_group = excluded.preferred_group
+        """,
+        (user_id, val),
+    )
+    await _sqlite_conn.commit()
+
+
+async def get_user_ids_for_schedule_notification(
+    affected_group_names: set[str],
+) -> list[int]:
+    """Підписані на новини; сповіщення про розклад — усім підписаним або лише з обраною групою зі списку змін."""
+    if not affected_group_names:
+        return []
+    if USE_POSTGRES:
+        assert _pg_pool
+        async with _pg_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT user_id FROM users
+                WHERE subscribed = 1
+                  AND (
+                    preferred_group IS NULL
+                    OR TRIM(preferred_group) = ''
+                    OR TRIM(preferred_group) = ANY($1::text[])
+                  )
+                """,
+                list(affected_group_names),
+            )
+            return [int(r["user_id"]) for r in rows]
+    assert _sqlite_conn
+    placeholders = ",".join("?" * len(affected_group_names))
+    q = f"""
+        SELECT user_id FROM users
+        WHERE subscribed = 1
+          AND (
+            preferred_group IS NULL
+            OR TRIM(preferred_group) = ''
+            OR TRIM(preferred_group) IN ({placeholders})
+          )
+    """
+    async with _sqlite_conn.execute(q, tuple(affected_group_names)) as cur:
+        rows = await cur.fetchall()
+        return [int(r[0]) for r in rows]
 
 
 async def count_users() -> int:

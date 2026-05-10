@@ -104,7 +104,7 @@ async def main() -> None:
     broadcast.register(admin_app, student_app)
     faq_mgmt.register(admin_app)
     news_mgmt.register(admin_app, student_app)
-    schedule_mgmt.register(admin_app)
+    schedule_mgmt.register(admin_app, student_app)
     consultations_mgmt.register(admin_app)
     social_mgmt.register(admin_app)
     sections_mgmt.register(admin_app)

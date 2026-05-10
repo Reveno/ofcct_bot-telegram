@@ -178,6 +178,25 @@ async def _start_schedule(
         elif q and q.message:
             await q.message.reply_text(text, reply_markup=reply_markup)
 
+    user = update.effective_user
+    if user:
+        row = await db.get_user(user.id)
+        pg = (row or {}).get("preferred_group")
+        if isinstance(pg, str):
+            pg = pg.strip()
+        else:
+            pg = ""
+        if pg:
+            all_groups = await db.get_all_groups()
+            if pg in all_groups:
+                context.user_data["sch_group"] = pg
+                context.user_data["sch_groups_list"] = list(all_groups)
+                await send(
+                    t("schedule.choose_day"),
+                    schedule_days_reply_keyboard(),
+                )
+                return SELECT_DAY
+
     ui_courses = await db.get_ui_course_buttons()
     if ui_courses is not None and len(ui_courses) == 0:
         await send(t("schedule.no_groups"), await main_menu_reply_keyboard())

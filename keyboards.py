@@ -225,19 +225,22 @@ def news_detail_reply_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
-def subscription_reply_keyboard(subscribed: bool) -> ReplyKeyboardMarkup:
+def subscription_reply_keyboard(
+    subscribed: bool, *, preferred_group: str | None = None
+) -> ReplyKeyboardMarkup:
     toggle = (
         t("subscription.unsubscribe")
         if subscribed
         else t("subscription.subscribe")
     )
-    return ReplyKeyboardMarkup(
+    rows: list[list[KeyboardButton]] = [[KeyboardButton(toggle)]]
+    rows.append([KeyboardButton(t("subscription.pick_group_btn"))])
+    if preferred_group:
+        rows.append([KeyboardButton(t("subscription.clear_group_btn"))])
+    rows.append(
         [
-            [KeyboardButton(toggle)],
-            [
-                KeyboardButton(t("common.back")),
-                KeyboardButton(t("schedule.to_main_menu")),
-            ],
-        ],
-        resize_keyboard=True,
+            KeyboardButton(t("common.back")),
+            KeyboardButton(t("schedule.to_main_menu")),
+        ]
     )
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
